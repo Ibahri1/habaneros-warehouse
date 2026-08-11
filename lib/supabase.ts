@@ -1,7 +1,9 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { createClient } from "@supabase/supabase-js";
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+const env = import.meta.env as Record<string, string | undefined>;
+const url = env.VITE_SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL;
+const key = env.VITE_SUPABASE_PUBLISHABLE_KEY || env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
 
 export const supabase = url && key ? createClient(url, key, {
   auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
@@ -9,20 +11,81 @@ export const supabase = url && key ? createClient(url, key, {
 
 export const isSupabaseConfigured = Boolean(supabase);
 
-/**
- * Production login sequence:
- * 1. signInAnonymously() creates an unprivileged transport identity.
- * 2. api.login_with_pin verifies the one-way PIN hash and binds auth.uid().
- * 3. RLS uses that binding for all subsequent authorization.
- */
-export async function loginWithPin(pin: string) {
+function client() {
   if (!supabase) throw new Error("Supabase environment variables are not configured.");
-  const existing = await supabase.auth.getSession();
-  if (!existing.data.session) {
-    const { error } = await supabase.auth.signInAnonymously();
+  return supabase;
+}
+
+async function rpc<T>(name: string, params: Record<string, unknown> = {}) {
+  const { data, error } = await client().rpc(name, params);
+  if (error) throw error;
+  return data as T;
+}
+
+export async function loginWithPin(pin: string) {
+  const current = await client().auth.getSession();
+  if (!current.data.session) {
+    const { error } = await client().auth.signInAnonymously();
     if (error) throw error;
   }
-  const { data, error } = await supabase.schema("api").rpc("login_with_pin", { input_pin: pin });
-  if (error) throw error;
-  return data;
+  return rpc<{id:string;display_name:string;role:string}>("warehouse_login_with_pin", { input_pin: pin });
 }
+
+export async function restoreWarehouseSession() {
+  const { data } = await client().auth.getSession();
+  if (!data.session) return null;
+  try { return await getWarehouseData(); } catch { return null; }
+}
+
+export async function logoutWarehouse() {
+  try { await rpc("warehouse_logout"); } finally { await client().auth.signOut(); }
+}
+
+export const getWarehouseData = () => rpc<any>("warehouse_get_app_data");
+
+export const submitWarehouseOrder = (locationId:string, note:string, items:{product_id:string;quantity:number}[]) =>
+  rpc<string>("warehouse_submit_order", { input_location_id:locationId, input_note:note, input_items:items });
+
+export const updateWarehouseOrder = (orderId:string, status:string, fulfillmentNote:string, deliveryNote:string) =>
+  rpc("warehouse_update_order", { input_order_id:orderId, input_status:status, input_fulfillment_note:fulfillmentNote, input_delivery_note:deliveryNote });
+
+export const changeWarehouseInventory = (productId:string, quantity:number, action:"received"|"adjusted", reason:string) =>
+  rpc("warehouse_change_inventory", { input_product_id:productId, input_quantity:quantity, input_action:action, input_reason:reason });
+
+export const saveWarehouseProduct = (value:any) => rpc<string>("warehouse_save_product", {
+  input_id:value.id || null,
+  input_category_id:value.category_id || null,
+  input_name:value.name,
+  input_sku:value.sku,
+  input_description:value.description,
+  input_unit_size:value.unit_size,
+  input_low_stock_threshold:Number(value.low_stock_threshold || 0),
+  input_is_active:value.is_active,
+  input_is_archived:value.is_archived,
+});
+
+export const saveWarehouseCategory = (value:any) => rpc<string>("warehouse_save_category", {
+  input_id:value.id || null, input_name:value.name, input_is_active:value.is_active,
+});
+
+export const deleteWarehouseProduct = (id:string) => rpc("warehouse_delete_product", { input_id:id });
+export const deleteWarehouseCategory = (id:string) => rpc("warehouse_delete_category", { input_id:id });
+
+export const saveWarehouseLocation = (value:any) => rpc<string>("warehouse_save_location", {
+  input_id:value.id || null, input_name:value.name, input_is_active:value.is_active,
+});
+
+export const saveWarehouseUser = (value:any) => rpc<string>("warehouse_save_user", {
+  input_id:value.id || null,
+  input_display_name:value.display_name,
+  input_role:value.role,
+  input_pin:value.pin || null,
+  input_location_id:value.role === "manager" ? value.location_id : null,
+  input_is_active:value.is_active,
+});
+
+export const saveWarehouseSettings = (value:any) => rpc("warehouse_save_settings", {
+  input_name:value.warehouse_name,
+  input_low_stock:Number(value.default_low_stock || 0),
+  input_show_images:value.show_images,
+});

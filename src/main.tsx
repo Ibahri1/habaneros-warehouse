@@ -7,5 +7,5 @@ import { WarehouseApp } from "../app/warehouse-app";
 createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <WarehouseApp />
-  </React.StrictMode>
+  </React.StrictMode>,
 );
