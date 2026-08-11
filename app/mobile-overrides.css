@@ -1,0 +1,4 @@
+@media (max-width: 760px) {
+  aside nav button:nth-child(n+5) { display: grid; }
+  aside nav button { flex: 0 0 76px; }
+}
