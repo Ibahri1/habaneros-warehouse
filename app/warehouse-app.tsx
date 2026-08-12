@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any, jsx-a11y/label-has-associated-control, jsx-a11y/no-autofocus, jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions, @next/next/no-img-element */
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   changeWarehouseInventory, deleteWarehouseCategory, deleteWarehouseLocation, deleteWarehouseProduct, deleteWarehouseUser,
   hideFinalizedOrdersFromQueue,
@@ -196,7 +196,7 @@ function EditorModal({editor,categories,locations,close,save}:{editor:any;catego
         <label>Description<textarea value={value.description||""} onChange={e=>set("description",e.target.value)}/></label>
         <div className="form-grid"><label>Unit size<input value={value.unit_size||""} onChange={e=>set("unit_size",e.target.value)}/></label><label>Item Location <span className="optional">Optional</span><input value={value.item_location||""} onChange={e=>set("item_location",e.target.value)} placeholder="Example: Aisle 2, Shelf B"/></label></div>
         <label>Low-stock threshold<input type="number" min="0" value={value.low_stock_threshold} onChange={e=>set("low_stock_threshold",e.target.value)}/></label>
-        <ProductImageUpload currentPath={value.image_path} file={value._imageFile} disabled={saving} onFile={file=>set("_imageFile",file)} onError={error=>set("_imageError",error)}/>
+        <ProductImageUpload currentPath={value.image_path} file={value._imageFile} disabled={saving} product={value} onFile={file=>set("_imageFile",file)} onError={error=>set("_imageError",error)}/>
         {value._imageError&&<div className="field-error" role="alert">{value._imageError}</div>}
       </>}
       {(editor.kind==="category"||editor.kind==="location")&&<label>Name<input autoFocus value={value.name} onChange={e=>set("name",e.target.value)}/></label>}
@@ -208,14 +208,66 @@ function EditorModal({editor,categories,locations,close,save}:{editor:any;catego
   </section></div>;
 }
 
-function ProductImageUpload({currentPath,file,disabled,onFile,onError}:{currentPath?:string|null;file?:File;disabled?:boolean;onFile:(file:File)=>void;onError:(error:string)=>void}){
-  const preview=file?URL.createObjectURL(file):productImageUrl(currentPath);
-  const accept=(files:FileList|null)=>{const next=files?.[0];if(!next)return;const supported=["image/jpeg","image/png","image/webp","image/gif"];if(!supported.includes(next.type)){onError("Use a JPG, PNG, WebP, or GIF image.");return}if(next.size>6*1024*1024){onError("Image must be 6 MB or smaller.");return}onError("");onFile(next)};
-  return <div className={`image-upload ${disabled?"disabled":""}`} onDragOver={e=>{e.preventDefault();if(!disabled)e.currentTarget.classList.add("dragging")}} onDragLeave={e=>e.currentTarget.classList.remove("dragging")} onDrop={e=>{e.preventDefault();e.currentTarget.classList.remove("dragging");if(!disabled)accept(e.dataTransfer.files)}}>
-    {preview?<img src={preview} alt="Product preview"/>:<span className="image-upload-icon">▧</span>}
-    <div><b>Product picture</b><p>Drag and drop a JPG, PNG, WebP, or GIF (up to 6 MB), or browse your camera roll/files.</p>{file&&<small className="selected-file">Selected: {file.name}</small>}<label className="secondary file-button">Choose image<input type="file" disabled={disabled} accept="image/jpeg,image/png,image/webp,image/gif" onChange={e=>accept(e.target.files)}/></label></div>
+function drawProductCrop(canvas:HTMLCanvasElement,image:HTMLImageElement,zoom:number,rotation:number,offset:{x:number;y:number}){
+  const context=canvas.getContext("2d");if(!context)return;
+  const ratio=canvas.width/600;
+  const turns=((rotation%360)+360)%360;
+  const rotated=turns===90||turns===270;
+  const rotatedWidth=rotated?image.naturalHeight:image.naturalWidth;
+  const rotatedHeight=rotated?image.naturalWidth:image.naturalHeight;
+  const scale=Math.max(canvas.width/rotatedWidth,canvas.height/rotatedHeight)*zoom;
+  context.clearRect(0,0,canvas.width,canvas.height);
+  context.save();
+  context.translate(canvas.width/2+offset.x*ratio,canvas.height/2+offset.y*ratio);
+  context.rotate(rotation*Math.PI/180);
+  context.scale(scale,scale);
+  context.drawImage(image,-image.naturalWidth/2,-image.naturalHeight/2);
+  context.restore();
+}
+
+function ProductImageUpload({currentPath,file,disabled,onFile,onError,product}:{currentPath?:string|null;file?:File;disabled?:boolean;onFile:(file:File)=>void;onError:(error:string)=>void;product:any}){
+  const [source,setSource]=useState<File|null>(null);
+  const [sourceUrl,setSourceUrl]=useState("");
+  const [image,setImage]=useState<HTMLImageElement|null>(null);
+  const [tab,setTab]=useState<"crop"|"preview">("crop");
+  const [zoom,setZoom]=useState(1);
+  const [rotation,setRotation]=useState(0);
+  const [offset,setOffset]=useState({x:0,y:0});
+  const [processing,setProcessing]=useState(false);
+  const [dragStart,setDragStart]=useState<{x:number;y:number;ox:number;oy:number}|null>(null);
+  const canvasRef=useRef<HTMLCanvasElement>(null);
+  const sourceUrlRef=useRef("");
+  const onErrorRef=useRef(onError);
+  const appliedUrl=useMemo(()=>file?URL.createObjectURL(file):productImageUrl(currentPath),[file,currentPath]);
+
+  useEffect(()=>{onErrorRef.current=onError},[onError]);
+  useEffect(()=>{if(!sourceUrl)return;const next=new Image();next.onload=()=>setImage(next);next.onerror=()=>onErrorRef.current("This image could not be opened. Choose another JPG, PNG, WebP, or GIF.");next.src=sourceUrl},[sourceUrl]);
+  useEffect(()=>()=>{if(sourceUrlRef.current)URL.revokeObjectURL(sourceUrlRef.current)},[]);
+  useEffect(()=>{if(image&&canvasRef.current)drawProductCrop(canvasRef.current,image,zoom,rotation,offset)},[image,zoom,rotation,offset,tab]);
+  useEffect(()=>{if(!file)return;return()=>URL.revokeObjectURL(appliedUrl)},[file,appliedUrl]);
+
+  const accept=(files:FileList|null)=>{const next=files?.[0];if(!next)return;const supported=["image/jpeg","image/png","image/webp","image/gif"];if(!supported.includes(next.type)){onError("Use a JPG, PNG, WebP, or GIF image.");return}if(next.size>6*1024*1024){onError("Image must be 6 MB or smaller.");return}if(sourceUrlRef.current)URL.revokeObjectURL(sourceUrlRef.current);const url=URL.createObjectURL(next);sourceUrlRef.current=url;setSourceUrl(url);setSource(next);setImage(null);setZoom(1);setRotation(0);setOffset({x:0,y:0});setTab("crop");onError("Adjust the image and choose Apply crop before saving.")};
+  const reset=()=>{setZoom(1);setRotation(0);setOffset({x:0,y:0})};
+  const applyCrop=async()=>{if(!image)return;setProcessing(true);onError("");try{const output=document.createElement("canvas");output.width=1200;output.height=720;drawProductCrop(output,image,zoom,rotation,offset);const blob=await new Promise<Blob|null>(resolve=>output.toBlob(resolve,"image/webp",.84));if(!blob)throw new Error("The browser could not create the cropped image.");const processed=new File([blob],`${source?.name.replace(/\.[^.]+$/,"")||"product"}-cropped.webp`,{type:"image/webp"});onFile(processed);setTab("preview")}catch(error){onError(messageOf(error))}finally{setProcessing(false)}};
+  const pointerDown=(event:React.PointerEvent<HTMLCanvasElement>)=>{if(disabled)return;event.currentTarget.setPointerCapture(event.pointerId);setDragStart({x:event.clientX,y:event.clientY,ox:offset.x,oy:offset.y})};
+  const pointerMove=(event:React.PointerEvent<HTMLCanvasElement>)=>{if(!dragStart)return;const rect=event.currentTarget.getBoundingClientRect();setOffset({x:dragStart.ox+(event.clientX-dragStart.x)*600/rect.width,y:dragStart.oy+(event.clientY-dragStart.y)*360/rect.height})};
+  const pointerUp=()=>setDragStart(null);
+
+  return <div className={`image-editor ${disabled?"disabled":""}`}>
+    <div className="image-upload" onDragOver={e=>{e.preventDefault();if(!disabled)e.currentTarget.classList.add("dragging")}} onDragLeave={e=>e.currentTarget.classList.remove("dragging")} onDrop={e=>{e.preventDefault();e.currentTarget.classList.remove("dragging");if(!disabled)accept(e.dataTransfer.files)}}>
+      {appliedUrl?<img src={appliedUrl} alt="Current product"/>:<span className="image-upload-icon">▧</span>}
+      <div><b>Product picture</b><p>Drag and drop a JPG, PNG, WebP, or GIF (up to 6 MB), or browse your camera roll/files.</p>{source&&<small className="selected-file">Editing: {source.name}</small>}<label className="secondary file-button">{currentPath||file?"Replace image":"Choose image"}<input type="file" disabled={disabled} accept="image/jpeg,image/png,image/webp,image/gif" onChange={e=>accept(e.target.files)}/></label></div>
+    </div>
+    {sourceUrl&&<div className="image-workspace">
+      <div className="image-tabs" role="tablist"><button type="button" role="tab" aria-selected={tab==="crop"} className={tab==="crop"?"active":""} onClick={()=>setTab("crop")}>Resize &amp; Crop</button><button type="button" role="tab" aria-selected={tab==="preview"} className={tab==="preview"?"active":""} onClick={()=>setTab("preview")}>Product Preview</button></div>
+      {tab==="crop"?<div className="crop-panel">
+        <div className="crop-stage"><canvas ref={canvasRef} width="600" height="360" aria-label="Product image crop area" onPointerDown={pointerDown} onPointerMove={pointerMove} onPointerUp={pointerUp} onPointerCancel={pointerUp}/><span>Drag image to reposition</span></div>
+        <div className="crop-controls"><button type="button" className="secondary" onClick={()=>setZoom(value=>Math.max(1,Math.round((value-.1)*10)/10))} disabled={disabled||zoom<=1}>− Zoom out</button><button type="button" className="secondary" onClick={()=>setZoom(value=>Math.min(3,Math.round((value+.1)*10)/10))} disabled={disabled||zoom>=3}>+ Zoom in</button><button type="button" className="secondary" onClick={()=>setRotation(value=>value-90)} disabled={disabled}>↶ Rotate left</button><button type="button" className="secondary" onClick={()=>setRotation(value=>value+90)} disabled={disabled}>↷ Rotate right</button><button type="button" className="secondary" onClick={reset} disabled={disabled}>Reset</button><button type="button" className="primary" onClick={applyCrop} disabled={disabled||processing||!image}>{processing?"Applying…":"Apply crop"}</button></div>
+      </div>:<ProductImageCardPreview image={appliedUrl} product={product}/>}</div>}
   </div>;
 }
+
+function ProductImageCardPreview({image,product}:{image:string;product:any}){return <div className="product-preview-wrap"><article className="product-card preview-card"><div className="product-image">{image?<img src={image} alt="Cropped product preview"/>:<span>□</span>}</div><div className="product-info"><div className="meta"><span>{product.category||"Category"}</span><span>{product.sku||"SKU"}</span></div><h3>{product.name||"Product name"}</h3><p>{product.description||"Product description will appear here."}</p><small>{product.unit_size||"Unit size"}</small><div className="availability"><span>24 available</span><div className="qty" aria-label="Quantity preview"><button type="button" disabled>−</button><span>0</span><button type="button" disabled>+</button></div></div></div></article><p>This is how the applied crop behaves in the manager catalog. The card scales to phone width without changing the crop.</p></div>}
 
 function Settings({data,act}:{data:AppData;act:any}){const [value,setValue]=useState({warehouse_name:data.settings.warehouse_name||"Habaneros Central Warehouse",default_low_stock:data.settings.default_low_stock??8,show_images:data.settings.show_images??true});const set=(key:string,next:any)=>setValue(current=>({...current,[key]:next}));return <Management title="Warehouse settings" subtitle="Configure ordering and stock alerts."><div className="settings-form"><label>Warehouse display name<input value={value.warehouse_name} onChange={e=>set("warehouse_name",e.target.value)}/></label><label>Default low-stock threshold<input type="number" min="0" value={value.default_low_stock} onChange={e=>set("default_low_stock",e.target.value)}/></label><label className="toggle-row"><span><b>Show product images</b><small>Display stored product images in the catalog</small></span><input type="checkbox" checked={value.show_images} onChange={e=>set("show_images",e.target.checked)}/></label><button className="primary" onClick={()=>act(()=>saveWarehouseSettings(value),"Settings saved")}>Save settings</button></div></Management>}
 function MovementLog({movements}:{movements:Movement[]}){return <Management title="Inventory movement log" subtitle="A permanent record of every stock change."><div>{movements.map(x=><div className="simple-row" key={x.id}><div className="movement-qty">{x.quantity>0?"+":""}{x.quantity}</div><div className="grow"><b>{x.product}</b><small>{x.action} · {x.reason} · {x.actor||"System"} · {when(x.created_at)}</small></div></div>)}{!movements.length&&<p className="empty-copy">No inventory movements yet.</p>}</div></Management>}

@@ -83,6 +83,7 @@ npm.cmd run lint
 - Fulfillment/admin users can manually move Delivered or Cancelled orders to **Order History**. The order and its items are never deleted.
 - Changing a hidden Delivered or Cancelled order to another status clears its queue-hidden fields and returns it to the active queue.
 - Product images can be dragged into the product editor or selected from a device camera roll/files app. Images persist in Supabase Storage, not browser storage.
+- Selected product images can be repositioned, zoomed, and rotated in a 5:3 crop editor. Applying the crop creates a compact 1200×720 WebP and the Product Preview tab shows the actual catalog-card treatment before saving.
 - The optional **Item Location** appears in product administration and fulfillment picking details.
 - Deleted users, products, and locations disappear from active screens while old orders retain their saved names and item details.
 - The supplied Habanero's Mexican Food logo is stored at `public/assets/habaneros-logo.png` and appears in login, navigation, and printed picking slips.

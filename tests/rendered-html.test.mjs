@@ -34,6 +34,13 @@ test("product image saves expose progress, validation, and rollback failures", a
   assert.ok(app.indexOf("setEditor(null)") > app.indexOf("throw error"), "the editor closes only after successful save");
 });
 
+test("product images are cropped to the card ratio before Storage upload", async () => {
+  const app = await readFile(new URL("../app/warehouse-app.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  for (const text of ["Resize &amp; Crop","Product Preview","Zoom out","Zoom in","Rotate left","Rotate right","Apply crop","output.width=1200","output.height=720","image/webp","drawProductCrop"]) assert.ok(app.includes(text), text);
+  for (const text of ["grid-template-rows:160px","object-fit:cover","overflow:hidden",".crop-stage","aspect-ratio:5/3"]) assert.ok(css.includes(text), text);
+});
+
 test("delivered queue removal preserves history and enforces staff roles", async () => {
   const sql = await readFile(new URL("../supabase/migrations/20260812065358_queue_hidden_delivered_orders.sql", import.meta.url), "utf8");
   for (const text of ["hidden_from_queue_at","status='Delivered'","warehouse_hide_delivered_orders","warehouse_get_queue_hidden_orders","('fulfillment','admin')","grant execute"]) assert.ok(sql.includes(text), text);
