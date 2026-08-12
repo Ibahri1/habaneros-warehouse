@@ -41,13 +41,24 @@ export async function logoutWarehouse() {
   try { await rpc("warehouse_logout"); } finally { await client().auth.signOut(); }
 }
 
-export const getWarehouseData = () => rpc<any>("warehouse_get_app_data");
+export async function getWarehouseData() {
+  const data=await rpc<any>("warehouse_get_app_data");
+  if(data?.user?.role!=="manager"){
+    const hidden=await rpc<string[]>("warehouse_get_queue_hidden_orders");
+    const hiddenIds=new Set(hidden||[]);
+    data.orders=(data.orders||[]).map((order:any)=>({...order,queue_hidden:hiddenIds.has(order.id)}));
+  }
+  return data;
+}
 
 export const submitWarehouseOrder = (locationId:string, note:string, items:{product_id:string;quantity:number}[]) =>
   rpc<string>("warehouse_submit_order", { input_location_id:locationId, input_note:note, input_items:items });
 
 export const updateWarehouseOrder = (orderId:string, status:string, fulfillmentNote:string, deliveryNote:string) =>
   rpc("warehouse_update_order", { input_order_id:orderId, input_status:status, input_fulfillment_note:fulfillmentNote, input_delivery_note:deliveryNote });
+
+export const hideDeliveredOrdersFromQueue = (orderIds:string[]) =>
+  rpc<number>("warehouse_hide_delivered_orders", { input_order_ids:orderIds });
 
 export const changeWarehouseInventory = (productId:string, quantity:number, action:"received"|"adjusted", reason:string) =>
   rpc("warehouse_change_inventory", { input_product_id:productId, input_quantity:quantity, input_action:action, input_reason:reason });

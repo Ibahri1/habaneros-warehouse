@@ -29,6 +29,8 @@ Run `supabase/migrations/20260812062754_permanent_deletes_images_item_locations.
 
 The migration does not delete existing data. A product with inventory reserved by an active order cannot be deleted until that order is delivered or cancelled. Product image files are deleted through the Supabase Storage API after the database deletion succeeds.
 
+Run `supabase/migrations/20260812065358_queue_hidden_delivered_orders.sql` after the migration above. It adds the nullable queue-hidden timestamp/audit user fields and two role-protected RPCs. Fulfillment and administrator users can move delivered orders out of the active queue individually or in bulk without deleting order history.
+
 ## Required Auth setting
 
 In the Supabase dashboard, open **Authentication -> Providers -> Anonymous** and enable anonymous sign-ins. The browser obtains an anonymous Supabase Auth identity before the database verifies the warehouse PIN.
@@ -73,9 +75,12 @@ npm.cmd run lint
 ## Fulfillment history and product images
 
 - Delivered orders remain in **Order Queue** for 30 days, then appear under **Order History**.
+- Fulfillment/admin users can manually move delivered orders to **Order History** sooner. The order and its items are never deleted.
 - Product images can be dragged into the product editor or selected from a device camera roll/files app. Images persist in Supabase Storage, not browser storage.
 - The optional **Item Location** appears in product administration and fulfillment picking details.
 - Deleted users, products, and locations disappear from active screens while old orders retain their saved names and item details.
+- The supplied Habanero's Mexican Food logo is stored at `public/assets/habaneros-logo.png` and appears in login, navigation, and printed picking slips.
+- Light and dark themes follow the Habaneros Scheduler visual style. The theme choice is stored only as a device preference.
 
 ## Security model
 
