@@ -7,13 +7,27 @@ A mobile-first manager ordering and warehouse fulfillment application backed by 
 This build is configured for the **Habaneros Warehouse** project:
 
 ```env
-NEXT_PUBLIC_SUPABASE_URL=https://ggmnyitasbsndytpbmpl.supabase.co
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_mXRcKC7W76xLwZAuQXLx7w_pRoQ8FVG
+VITE_SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_REPLACE_ME
 ```
 
 These are public browser values. Never add a secret or service-role key to this project.
 
-The migration in `supabase/migrations/20260811000100_initial_warehouse_schema.sql` has already been applied to the connected project. It provides hashed PIN login, multi-device sessions, role checks, transactional inventory changes, audit records, and database functions for every application action.
+The migrations in `supabase/migrations` provide hashed PIN login, multi-device sessions, role checks, transactional inventory changes, audit records, and database functions for every application action.
+
+## Required upgrade SQL
+
+Run `supabase/migrations/20260812062754_permanent_deletes_images_item_locations.sql` once in the Supabase SQL Editor before publishing this frontend update. It:
+
+- snapshots manager, location, product, SKU, unit-size, and item-location values on orders;
+- changes historical foreign keys to `ON DELETE SET NULL` while keeping snapshot text readable;
+- adds administrator-only permanent user, product, and location deletion RPCs;
+- adds the optional product `item_location` column;
+- creates the public `product-images` Storage bucket with a 6 MB image limit;
+- grants product-image writes to fulfillment/admin users and image deletion to admins only; and
+- updates the app-data and order-submission RPCs to return/store the new fields.
+
+The migration does not delete existing data. A product with inventory reserved by an active order cannot be deleted until that order is delivered or cancelled. Product image files are deleted through the Supabase Storage API after the database deletion succeeds.
 
 ## Required Auth setting
 
@@ -27,7 +41,7 @@ Supabase recommends CAPTCHA or Cloudflare Turnstile and reviewing anonymous sign
 - Fulfillment: `5678`
 - Administrator: `9876` (Isaac)
 
-Use **Users & Codes** while signed in as the administrator to replace these test codes, add managers or fulfillment users, assign manager locations, or disable access. PINs are stored only as one-way hashes and cannot be viewed after saving.
+Use **Employees & Codes** while signed in as the administrator to replace test codes, add managers or fulfillment users, assign manager locations, reset codes, or permanently delete employees. PINs are stored only as one-way hashes and cannot be viewed after saving.
 
 ## Run locally
 
@@ -52,9 +66,16 @@ npm.cmd run lint
 - Submitting an order reserves stock atomically.
 - Delivering an order reduces On Hand and Reserved.
 - Cancelling an order releases Reserved stock.
-- Receiving and adjustments immediately update inventory.
+- Inventory adjustments immediately update inventory.
 - Adjustments cannot reduce On Hand below Reserved.
 - Every stock change creates an inventory movement record.
+
+## Fulfillment history and product images
+
+- Delivered orders remain in **Order Queue** for 30 days, then appear under **Order History**.
+- Product images can be dragged into the product editor or selected from a device camera roll/files app. Images persist in Supabase Storage, not browser storage.
+- The optional **Item Location** appears in product administration and fulfillment picking details.
+- Deleted users, products, and locations disappear from active screens while old orders retain their saved names and item details.
 
 ## Security model
 

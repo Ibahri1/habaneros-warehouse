@@ -4,7 +4,9 @@ import { readFile } from "node:fs/promises";
 
 test("warehouse app contains the required browser workflows", async () => {
   const app = await readFile(new URL("../app/warehouse-app.tsx", import.meta.url), "utf8");
-  for (const text of ["Submit Warehouse Order","Order queue","Receive inventory","Adjust inventory","Movement Log","Employees & Codes","Out for Delivery","Delivered","Cancelled","print-notes","deleteWarehouseProduct","deleteWarehouseCategory"]) assert.ok(app.includes(text), text);
+  for (const text of ["Submit Warehouse Order","Order queue","Order history","Adjust inventory","Movement Log","Employees & Codes","Out for Delivery","Delivered","Cancelled","print-notes","deleteWarehouseProduct","deleteWarehouseLocation","deleteWarehouseUser","ProductImageUpload","Item Location"]) assert.ok(app.includes(text), text);
+  assert.ok(!app.includes('[["receiving","Receive"]'), "Receive navigation is removed");
+  assert.ok(!app.includes("Archive product"), "Archive product control is removed");
   assert.ok(!/checkout|payment screen|admin@example/i.test(app));
 });
 
@@ -25,7 +27,7 @@ test("admin actions call the live warehouse adapter", async () => {
 
 test("frontend environment contains only public placeholders", async () => {
   const env = await readFile(new URL("../.env.example", import.meta.url), "utf8");
-  assert.match(env,/NEXT_PUBLIC_SUPABASE_URL/);
-  assert.match(env,/NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY/);
+  assert.match(env,/VITE_SUPABASE_URL/);
+  assert.match(env,/VITE_SUPABASE_PUBLISHABLE_KEY/);
   assert.doesNotMatch(env,/SERVICE_ROLE|SECRET_KEY/);
 });
