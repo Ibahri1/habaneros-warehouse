@@ -57,7 +57,7 @@ export const submitWarehouseOrder = (locationId:string, note:string, items:{prod
 export const updateWarehouseOrder = (orderId:string, status:string, fulfillmentNote:string, deliveryNote:string) =>
   rpc("warehouse_update_order", { input_order_id:orderId, input_status:status, input_fulfillment_note:fulfillmentNote, input_delivery_note:deliveryNote });
 
-export const hideDeliveredOrdersFromQueue = (orderIds:string[]) =>
+export const hideFinalizedOrdersFromQueue = (orderIds:string[]) =>
   rpc<number>("warehouse_hide_delivered_orders", { input_order_ids:orderIds });
 
 export const changeWarehouseInventory = (productId:string, quantity:number, action:"received"|"adjusted", reason:string) =>

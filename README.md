@@ -31,6 +31,8 @@ The migration does not delete existing data. A product with inventory reserved b
 
 Run `supabase/migrations/20260812065358_queue_hidden_delivered_orders.sql` after the migration above. It adds the nullable queue-hidden timestamp/audit user fields and two role-protected RPCs. Fulfillment and administrator users can move delivered orders out of the active queue individually or in bulk without deleting order history.
 
+Run `supabase/migrations/20260812074819_reopen_finalized_orders_and_queue_removal.sql` after the queue-hidden migration. It extends queue removal and Order History to manually removed Cancelled orders, and replaces the order-status RPC so Delivered or Cancelled orders can be corrected safely. The existing RPC name is retained for deployment compatibility.
+
 ## Required Auth setting
 
 In the Supabase dashboard, open **Authentication -> Providers -> Anonymous** and enable anonymous sign-ins. The browser obtains an anonymous Supabase Auth identity before the database verifies the warehouse PIN.
@@ -68,14 +70,18 @@ npm.cmd run lint
 - Submitting an order reserves stock atomically.
 - Delivering an order reduces On Hand and Reserved.
 - Cancelling an order releases Reserved stock.
+- Reopening a Delivered order restores both On Hand and Reserved.
+- Reopening a Cancelled order restores Reserved only when enough stock is still Available; otherwise the correction fails without changing anything.
+- Moving between Delivered and Cancelled first reverses the old inventory effect and then applies the new effect in the same transaction.
 - Inventory adjustments immediately update inventory.
 - Adjustments cannot reduce On Hand below Reserved.
-- Every stock change creates an inventory movement record.
+- Every stock change and reversal creates a balancing inventory movement record, preventing repeated corrections from duplicating the net inventory effect.
 
 ## Fulfillment history and product images
 
 - Delivered orders remain in **Order Queue** for 30 days, then appear under **Order History**.
-- Fulfillment/admin users can manually move delivered orders to **Order History** sooner. The order and its items are never deleted.
+- Fulfillment/admin users can manually move Delivered or Cancelled orders to **Order History**. The order and its items are never deleted.
+- Changing a hidden Delivered or Cancelled order to another status clears its queue-hidden fields and returns it to the active queue.
 - Product images can be dragged into the product editor or selected from a device camera roll/files app. Images persist in Supabase Storage, not browser storage.
 - The optional **Item Location** appears in product administration and fulfillment picking details.
 - Deleted users, products, and locations disappear from active screens while old orders retain their saved names and item details.

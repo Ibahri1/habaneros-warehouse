@@ -7,7 +7,7 @@ test("warehouse app contains the required browser workflows", async () => {
   for (const text of ["Submit Warehouse Order","Order queue","Order history","Adjust inventory","Movement Log","Employees & Codes","Out for Delivery","Delivered","Cancelled","print-notes","deleteWarehouseProduct","deleteWarehouseLocation","deleteWarehouseUser","ProductImageUpload","Item Location"]) assert.ok(app.includes(text), text);
   assert.ok(!app.includes('[["receiving","Receive"]'), "Receive navigation is removed");
   assert.ok(!app.includes("Archive product"), "Archive product control is removed");
-  for (const text of ["Delete from queue","Delete selected delivered orders from queue","queue_hidden","BrandLogo","warehouse-theme"]) assert.ok(app.includes(text), text);
+  for (const text of ["Remove from queue","Remove selected Delivered/Cancelled orders from queue","queue_hidden","BrandLogo","warehouse-theme"]) assert.ok(app.includes(text), text);
   assert.ok(!/checkout|payment screen|admin@example/i.test(app));
 });
 
@@ -38,6 +38,14 @@ test("delivered queue removal preserves history and enforces staff roles", async
   const sql = await readFile(new URL("../supabase/migrations/20260812065358_queue_hidden_delivered_orders.sql", import.meta.url), "utf8");
   for (const text of ["hidden_from_queue_at","status='Delivered'","warehouse_hide_delivered_orders","warehouse_get_queue_hidden_orders","('fulfillment','admin')","grant execute"]) assert.ok(sql.includes(text), text);
   assert.doesNotMatch(sql,/delete\s+from\s+public\.orders/i);
+});
+
+test("finalized orders can be hidden or transactionally reopened", async () => {
+  const sql = await readFile(new URL("../supabase/migrations/20260812074819_reopen_finalized_orders_and_queue_removal.sql", import.meta.url), "utf8");
+  const app = await readFile(new URL("../app/warehouse-app.tsx", import.meta.url), "utf8");
+  for (const text of ["status in ('Delivered','Cancelled')","Delivery reversed after status correction","Cancellation reversed after status correction","available>=item.requested_quantity","hidden_from_queue_at=case when input_status<>old_status then null","private.current_app_role() not in ('fulfillment','admin')","for update"]) assert.ok(sql.includes(text), text);
+  assert.doesNotMatch(sql,/delete\s+from\s+public\.orders/i);
+  for (const text of ["Remove selected Delivered/Cancelled orders from queue","Only Delivered or Cancelled orders can be removed","Inventory and reservations will be updated automatically","o.status===\"Cancelled\"&&o.queue_hidden"]) assert.ok(app.includes(text), text);
 });
 
 test("frontend environment contains only public placeholders", async () => {
