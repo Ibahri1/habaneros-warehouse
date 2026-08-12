@@ -108,7 +108,29 @@ function Admin(p:any){
   const [queueSearch,setQueueSearch]=useState("");
   const [selectedQueueOrders,setSelectedQueueOrders]=useState<string[]>([]);
   const [historyCutoff]=useState(()=>Date.now()-30*86400000);
-  const save=async(kind:string,value:any)=>{const calls:any={product:saveWarehouseProduct,category:saveWarehouseCategory,location:saveWarehouseLocation,user:saveWarehouseUser};try{if(kind==="user"||kind==="location")value.is_active=true;const oldImage=value.image_path;if(kind==="product"&&value._imageFile)value.image_path=await uploadWarehouseProductImage(value._imageFile);await p.act(()=>calls[kind](value),`${kind[0].toUpperCase()+kind.slice(1)} saved`);if(kind==="product"&&oldImage&&oldImage!==value.image_path)removeWarehouseProductImage(oldImage).catch(()=>undefined);setEditor(null)}catch{return}};
+  const save=async(kind:string,value:any)=>{
+    const calls:any={product:saveWarehouseProduct,category:saveWarehouseCategory,location:saveWarehouseLocation,user:saveWarehouseUser};
+    const payload={...value};
+    const oldImage=payload.image_path as string|null|undefined;
+    let uploadedImage:string|null=null;
+    if(kind==="user"||kind==="location")payload.is_active=true;
+    try{
+      await p.act(async()=>{
+        if(kind==="product"&&payload._imageFile){
+          uploadedImage=await uploadWarehouseProductImage(payload._imageFile);
+          payload.image_path=uploadedImage;
+        }
+        await calls[kind](payload);
+      },`${kind[0].toUpperCase()+kind.slice(1)} saved`);
+    }catch(error){
+      // Avoid orphaning a newly uploaded image when the product write fails.
+      if(uploadedImage)await removeWarehouseProductImage(uploadedImage).catch(()=>undefined);
+      throw error;
+    }
+    // Keep the previous image until both the replacement upload and product write succeed.
+    if(kind==="product"&&oldImage&&uploadedImage&&oldImage!==uploadedImage)removeWarehouseProductImage(oldImage).catch(()=>undefined);
+    setEditor(null);
+  };
   const remove=async(kind:"product"|"category"|"location"|"user",value:any)=>{const display=value.name||value.display_name;if(!window.confirm(`Permanently delete ${display}? This cannot be undone.`))return;const actions:any={product:deleteWarehouseProduct,category:deleteWarehouseCategory,location:deleteWarehouseLocation,user:deleteWarehouseUser};try{await p.act(()=>actions[kind](value.id),`${kind[0].toUpperCase()+kind.slice(1)} deleted`)}catch{return}};
   const hideFromQueue=async(ids:string[])=>{const delivered=ids.filter(id=>p.data.orders.some((o:Order)=>o.id===id&&o.status==="Delivered"));if(!delivered.length){window.alert("Only delivered orders can be deleted from the active queue.");return}const ignored=ids.length-delivered.length;const detail=ignored?` ${ignored} non-delivered selection${ignored===1?" was":"s were"} ignored.`:"";if(!window.confirm(`Delete ${delivered.length} delivered order${delivered.length===1?"":"s"} from the active queue? The order history will be preserved.${detail}`))return;try{await p.act(()=>hideDeliveredOrdersFromQueue(delivered),`${delivered.length} delivered order${delivered.length===1?"":"s"} moved to history`);setSelectedQueueOrders([])}catch{return}};
   const toggleQueueOrder=(id:string)=>setSelectedQueueOrders(current=>current.includes(id)?current.filter(x=>x!==id):[...current,id]);
@@ -146,12 +168,23 @@ function InventoryForm({data,act}:{data:AppData;act:any}){
   return <><PageHead eyebrow="INVENTORY" title="Adjust inventory" subtitle="Correct warehouse stock with a required audit reason."/><section className="panel form-panel"><label>Product<select value={productId} onChange={e=>setProductId(e.target.value)}><option value="">Select a product</option>{data.products.map(x=><option key={x.id} value={x.id}>{x.name} · {x.sku}</option>)}</select></label>{product&&<div className="inventory-preview"><span>On hand <b>{product.on_hand}</b></span><span>Reserved <b>{product.reserved}</b></span><span>Available <b>{product.available}</b></span></div>}<div className="form-grid"><label>Quantity change<input type="number" value={quantity} onChange={e=>setQuantity(e.target.value)} placeholder="e.g. -2 or 5"/></label><label>Adjustment reason<input value={reason} onChange={e=>setReason(e.target.value)} placeholder="Required reason"/></label></div><button className="primary" disabled={!productId||!Number(quantity)||!reason.trim()} onClick={submit}>Record adjustment</button></section></>;
 }
 
-function EditorModal({editor,categories,locations,close,save}:{editor:any;categories:Category[];locations:Location[];close:()=>void;save:(kind:string,value:any)=>void}){
+function EditorModal({editor,categories,locations,close,save}:{editor:any;categories:Category[];locations:Location[];close:()=>void;save:(kind:string,value:any)=>Promise<void>}){
   const defaults:any={product:{name:"",sku:"",category_id:categories[0]?.id||null,description:"",unit_size:"",item_location:"",image_path:null,low_stock_threshold:8},category:{name:"",is_active:true},location:{name:"",is_active:true},user:{display_name:"",role:"manager",pin:"",location_id:locations[0]?.id||null,is_active:true}};
   const [value,setValue]=useState({...defaults[editor.kind],...editor.value,pin:""});
-  const set=(key:string,next:any)=>setValue((current:any)=>({...current,[key]:next}));
-  return <div className="modal-backdrop" role="presentation" onMouseDown={e=>e.target===e.currentTarget&&close()}><section className="modal" role="dialog" aria-modal="true">
-    <div className="modal-head"><h2>{editor.value.id?"Edit":"Add"} {editor.kind}</h2><button className="icon-button" onClick={close} aria-label="Close">×</button></div>
+  const [saving,setSaving]=useState(false);
+  const [formError,setFormError]=useState("");
+  const set=(key:string,next:any)=>{setFormError("");setValue((current:any)=>({...current,[key]:next}))};
+  const submit=async()=>{
+    setFormError("");
+    const name=(value.name||value.display_name||"").trim();
+    if(!name){setFormError(`${editor.kind==="user"?"Display name":`${editor.kind[0].toUpperCase()+editor.kind.slice(1)} name`} is required.`);return}
+    if(editor.kind==="user"&&!editor.value.id&&value.pin.length!==4){setFormError("Enter a 4-digit access code.");return}
+    if(editor.kind==="product"&&value._imageError){setFormError(value._imageError);return}
+    setSaving(true);
+    try{await save(editor.kind,value)}catch(error){setFormError(messageOf(error))}finally{setSaving(false)}
+  };
+  return <div className="modal-backdrop" role="presentation" onMouseDown={e=>{if(!saving&&e.target===e.currentTarget)close()}}><section className="modal" role="dialog" aria-modal="true" aria-busy={saving}>
+    <div className="modal-head"><h2>{editor.value.id?"Edit":"Add"} {editor.kind}</h2><button className="icon-button" disabled={saving} onClick={close} aria-label="Close">×</button></div>
     <div className="modal-form">
       {editor.kind==="product"&&<>
         <label>Name<input value={value.name} onChange={e=>set("name",e.target.value)}/></label>
@@ -159,22 +192,24 @@ function EditorModal({editor,categories,locations,close,save}:{editor:any;catego
         <label>Description<textarea value={value.description||""} onChange={e=>set("description",e.target.value)}/></label>
         <div className="form-grid"><label>Unit size<input value={value.unit_size||""} onChange={e=>set("unit_size",e.target.value)}/></label><label>Item Location <span className="optional">Optional</span><input value={value.item_location||""} onChange={e=>set("item_location",e.target.value)} placeholder="Example: Aisle 2, Shelf B"/></label></div>
         <label>Low-stock threshold<input type="number" min="0" value={value.low_stock_threshold} onChange={e=>set("low_stock_threshold",e.target.value)}/></label>
-        <ProductImageUpload currentPath={value.image_path} file={value._imageFile} onFile={file=>set("_imageFile",file)}/>
+        <ProductImageUpload currentPath={value.image_path} file={value._imageFile} disabled={saving} onFile={file=>set("_imageFile",file)} onError={error=>set("_imageError",error)}/>
+        {value._imageError&&<div className="field-error" role="alert">{value._imageError}</div>}
       </>}
       {(editor.kind==="category"||editor.kind==="location")&&<label>Name<input autoFocus value={value.name} onChange={e=>set("name",e.target.value)}/></label>}
       {editor.kind==="user"&&<><label>Display name<input value={value.display_name} onChange={e=>set("display_name",e.target.value)}/></label><div className="form-grid"><label>Role<select value={value.role} onChange={e=>set("role",e.target.value)}><option value="manager">Manager</option><option value="fulfillment">Fulfillment</option><option value="admin">Administrator</option></select></label><label>{editor.value.id?"New 4-digit code (optional)":"4-digit code"}<input inputMode="numeric" maxLength={4} value={value.pin} onChange={e=>set("pin",e.target.value.replace(/\D/g,"").slice(0,4))}/></label></div>{value.role==="manager"&&<label>Location<select value={value.location_id||""} onChange={e=>set("location_id",e.target.value)}>{locations.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label>}</>}
       {editor.kind==="category"&&<label className="check-row"><input type="checkbox" checked={value.is_active} onChange={e=>set("is_active",e.target.checked)}/> Active</label>}
     </div>
-    <div className="modal-actions"><button className="secondary" onClick={close}>Cancel</button><button className="primary" disabled={!((value.name||value.display_name||"").trim())||(editor.kind==="user"&&!editor.value.id&&value.pin.length!==4)} onClick={()=>save(editor.kind,value)}>Save</button></div>
+    {formError&&<div className="form-error" role="alert">{formError}</div>}
+    <div className="modal-actions"><button className="secondary" disabled={saving} onClick={close}>Cancel</button><button className="primary" disabled={saving} onClick={submit}>{saving?(value._imageFile?"Uploading & saving…":"Saving…"):"Save"}</button></div>
   </section></div>;
 }
 
-function ProductImageUpload({currentPath,file,onFile}:{currentPath?:string|null;file?:File;onFile:(file:File)=>void}){
+function ProductImageUpload({currentPath,file,disabled,onFile,onError}:{currentPath?:string|null;file?:File;disabled?:boolean;onFile:(file:File)=>void;onError:(error:string)=>void}){
   const preview=file?URL.createObjectURL(file):productImageUrl(currentPath);
-  const accept=(files:FileList|null)=>{const next=files?.[0];if(next&&next.type.startsWith("image/"))onFile(next)};
-  return <div className="image-upload" onDragOver={e=>{e.preventDefault();e.currentTarget.classList.add("dragging")}} onDragLeave={e=>e.currentTarget.classList.remove("dragging")} onDrop={e=>{e.preventDefault();e.currentTarget.classList.remove("dragging");accept(e.dataTransfer.files)}}>
+  const accept=(files:FileList|null)=>{const next=files?.[0];if(!next)return;const supported=["image/jpeg","image/png","image/webp","image/gif"];if(!supported.includes(next.type)){onError("Use a JPG, PNG, WebP, or GIF image.");return}if(next.size>6*1024*1024){onError("Image must be 6 MB or smaller.");return}onError("");onFile(next)};
+  return <div className={`image-upload ${disabled?"disabled":""}`} onDragOver={e=>{e.preventDefault();if(!disabled)e.currentTarget.classList.add("dragging")}} onDragLeave={e=>e.currentTarget.classList.remove("dragging")} onDrop={e=>{e.preventDefault();e.currentTarget.classList.remove("dragging");if(!disabled)accept(e.dataTransfer.files)}}>
     {preview?<img src={preview} alt="Product preview"/>:<span className="image-upload-icon">▧</span>}
-    <div><b>Product picture</b><p>Drag and drop an image here, or browse your camera roll/files.</p><label className="secondary file-button">Choose image<input type="file" accept="image/*" onChange={e=>accept(e.target.files)}/></label></div>
+    <div><b>Product picture</b><p>Drag and drop a JPG, PNG, WebP, or GIF (up to 6 MB), or browse your camera roll/files.</p>{file&&<small className="selected-file">Selected: {file.name}</small>}<label className="secondary file-button">Choose image<input type="file" disabled={disabled} accept="image/jpeg,image/png,image/webp,image/gif" onChange={e=>accept(e.target.files)}/></label></div>
   </div>;
 }
 
