@@ -20,8 +20,8 @@ test("migration protects inventory and PINs", async () => {
 test("admin actions call the live warehouse adapter", async () => {
   const app = await readFile(new URL("../app/warehouse-app.tsx", import.meta.url), "utf8");
   const adapter = await readFile(new URL("../lib/supabase.ts", import.meta.url), "utf8");
-  for (const text of ["saveWarehouseProduct","saveWarehouseCategory","saveWarehouseLocation","saveWarehouseUser","changeWarehouseInventory","window.print()","setSelectedOrder(null)"]) assert.ok(app.includes(text), text);
-  for (const text of ["signInAnonymously","warehouse_get_app_data","warehouse_save_user","warehouse_change_inventory"]) assert.ok(adapter.includes(text), text);
+  for (const text of ["saveWarehouseProduct","saveWarehouseCategory","saveWarehouseLocation","saveWarehouseUser","bulkAdjustWarehouseInventory","window.print()","setSelectedOrder(null)"]) assert.ok(app.includes(text), text);
+  for (const text of ["signInAnonymously","warehouse_get_app_data","warehouse_save_user","warehouse_bulk_adjust_inventory"]) assert.ok(adapter.includes(text), text);
   assert.ok(adapter.includes("warehouse_hide_delivered_orders"));
   assert.ok(app.includes('...(role==="admin"?[["users","Employees & Codes"]'), "administrator navigation is flattened into the sidebar");
   assert.ok(!app.includes('...[role==="admin"?[["users"'), "administrator navigation is not nested");
@@ -65,4 +65,20 @@ test("frontend environment contains only public placeholders", async () => {
 test("mobile navigation stays fixed, scrollable, and clear of page content", async () => {
   const css = await readFile(new URL("../app/mobile-overrides.css", import.meta.url), "utf8");
   for (const text of ["@media (max-width: 768px)","position: fixed","overflow-x: auto","aside nav button:nth-child(n+5)","env(safe-area-inset-bottom)","padding-bottom: calc(var(--mobile-nav-height)"]) assert.ok(css.includes(text), text);
+});
+
+test("managers support multiple locations and all-location access", async () => {
+  const sql = await readFile(new URL("../supabase/migrations/20260813003347_multi_location_managers_bulk_inventory.sql", import.meta.url), "utf8");
+  const app = await readFile(new URL("../app/warehouse-app.tsx", import.meta.url), "utf8");
+  for (const text of ["all_locations boolean not null default false","'location_ids'","input_location_ids uuid[]","Managers require at least one location","l.is_active","private.current_app_role()<>'admin'"]) assert.ok(sql.includes(text), text);
+  for (const text of ["All locations","Select all that apply","New active locations will be included automatically.","location_ids"]) assert.ok(app.includes(text), text);
+});
+
+test("bulk inventory adjustment is transactional and fully logged", async () => {
+  const sql = await readFile(new URL("../supabase/migrations/20260813003347_multi_location_managers_bulk_inventory.sql", import.meta.url), "utf8");
+  const app = await readFile(new URL("../app/warehouse-app.tsx", import.meta.url), "utf8");
+  const adapter = await readFile(new URL("../lib/supabase.ts", import.meta.url), "utf8");
+  for (const text of ["warehouse_bulk_adjust_inventory","input_product_ids uuid[]","Quantity change cannot be zero","Adjustment would reduce stock below reserved inventory","insert into public.inventory_movements","private.current_app_role() not in ('fulfillment','admin')"]) assert.ok(sql.includes(text), text);
+  for (const text of ["Inventory adjustment","Select products","Apply adjustment to","Apply ${amount>0?\"+\":\"\"}${amount} to ${selected.length} selected products?"]) assert.ok(app.includes(text), text);
+  assert.ok(adapter.includes('rpc<number>("warehouse_bulk_adjust_inventory"'));
 });

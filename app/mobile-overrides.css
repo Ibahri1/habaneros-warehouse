@@ -148,4 +148,26 @@
     min-width: 0;
     padding: 6px;
   }
+
+  .location-checklist {
+    grid-template-columns: 1fr;
+  }
+
+  .selection-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .selection-head .secondary {
+    width: 100%;
+  }
+
+  .product-check {
+    grid-template-columns: 24px minmax(0, 1fr);
+  }
+
+  .product-check .stock-summary {
+    grid-column: 2;
+    text-align: left;
+  }
 }

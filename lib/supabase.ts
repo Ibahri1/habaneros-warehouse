@@ -60,8 +60,8 @@ export const updateWarehouseOrder = (orderId:string, status:string, fulfillmentN
 export const hideFinalizedOrdersFromQueue = (orderIds:string[]) =>
   rpc<number>("warehouse_hide_delivered_orders", { input_order_ids:orderIds });
 
-export const changeWarehouseInventory = (productId:string, quantity:number, action:"received"|"adjusted", reason:string) =>
-  rpc("warehouse_change_inventory", { input_product_id:productId, input_quantity:quantity, input_action:action, input_reason:reason });
+export const bulkAdjustWarehouseInventory = (productIds:string[], quantity:number, reason:string) =>
+  rpc<number>("warehouse_bulk_adjust_inventory", { input_product_ids:productIds, input_quantity:quantity, input_reason:reason });
 
 export const saveWarehouseProduct = (value:any) => rpc<string>("warehouse_save_product", {
   input_id:value.id || null,
@@ -113,7 +113,8 @@ export const saveWarehouseUser = (value:any) => rpc<string>("warehouse_save_user
   input_display_name:value.display_name,
   input_role:value.role,
   input_pin:value.pin || null,
-  input_location_id:value.role === "manager" ? value.location_id : null,
+  input_location_ids:value.role === "manager" ? value.location_ids || [] : [],
+  input_all_locations:value.role === "manager" && Boolean(value.all_locations),
   input_is_active:value.is_active,
 });
 

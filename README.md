@@ -33,6 +33,8 @@ Run `supabase/migrations/20260812065358_queue_hidden_delivered_orders.sql` after
 
 Run `supabase/migrations/20260812074819_reopen_finalized_orders_and_queue_removal.sql` after the queue-hidden migration. It extends queue removal and Order History to manually removed Cancelled orders, and replaces the order-status RPC so Delivered or Cancelled orders can be corrected safely. The existing RPC name is retained for deployment compatibility.
 
+Run `supabase/migrations/20260813003347_multi_location_managers_bulk_inventory.sql` next. It adds persistent **All locations** access, returns every manager assignment to the employee editor, keeps existing single-location assignments, and adds a role-protected transactional bulk inventory adjustment RPC. Managers marked All locations automatically receive every current and future active location.
+
 ## Required Auth setting
 
 In the Supabase dashboard, open **Authentication -> Providers -> Anonymous** and enable anonymous sign-ins. The browser obtains an anonymous Supabase Auth identity before the database verifies the warehouse PIN.
@@ -74,6 +76,7 @@ npm.cmd run lint
 - Reopening a Cancelled order restores Reserved only when enough stock is still Available; otherwise the correction fails without changing anything.
 - Moving between Delivered and Cancelled first reverses the old inventory effect and then applies the new effect in the same transaction.
 - Inventory adjustments immediately update inventory.
+- One inventory adjustment can apply the same quantity and shared reason to several selected products. The bulk operation is all-or-nothing and writes a separate movement for each product.
 - Adjustments cannot reduce On Hand below Reserved.
 - Every stock change and reversal creates a balancing inventory movement record, preventing repeated corrections from duplicating the net inventory effect.
 
