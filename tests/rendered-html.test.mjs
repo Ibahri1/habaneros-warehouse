@@ -1,13 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { consolidatePickingItems } from "../lib/picking-list.mjs";
 
 test("warehouse app contains the required browser workflows", async () => {
   const app = await readFile(new URL("../app/warehouse-app.tsx", import.meta.url), "utf8");
   for (const text of ["Submit Warehouse Order","Order queue","Order history","Adjust inventory","Movement Log","Employees & Codes","Out for Delivery","Delivered","Cancelled","print-notes","deleteWarehouseProduct","deleteWarehouseLocation","deleteWarehouseUser","ProductImageUpload","Item Location"]) assert.ok(app.includes(text), text);
   assert.ok(!app.includes('[["receiving","Receive"]'), "Receive navigation is removed");
   assert.ok(!app.includes("Archive product"), "Archive product control is removed");
-  for (const text of ["Remove from queue","Remove selected Delivered/Cancelled orders from queue","queue_hidden","BrandLogo","warehouse-theme"]) assert.ok(app.includes(text), text);
+  for (const text of ["Remove from queue","Remove selected Delivered/Cancelled orders from queue","queue_hidden","BrandLogo"]) assert.ok(app.includes(text), text);
+  for (const text of ["warehouse-theme","toggleTheme","theme-toggle","data-theme"]) assert.ok(!app.includes(text), `${text} is removed`);
   assert.ok(!/checkout|payment screen|admin@example/i.test(app));
 });
 
@@ -23,8 +25,8 @@ test("admin actions call the live warehouse adapter", async () => {
   for (const text of ["saveWarehouseProduct","saveWarehouseCategory","saveWarehouseLocation","saveWarehouseUser","bulkAdjustWarehouseInventory","window.print()","setSelectedOrder(null)"]) assert.ok(app.includes(text), text);
   for (const text of ["signInAnonymously","warehouse_get_app_data","warehouse_save_user","warehouse_bulk_adjust_inventory"]) assert.ok(adapter.includes(text), text);
   assert.ok(adapter.includes("warehouse_hide_delivered_orders"));
-  assert.ok(app.includes('...(role==="admin"?[["users","Employees & Codes"]'), "administrator navigation is flattened into the sidebar");
-  assert.ok(!app.includes('...[role==="admin"?[["users"'), "administrator navigation is not nested");
+  assert.ok(app.includes('const adminNav:[View,string][]='), "administrator navigation remains available");
+  assert.ok(app.includes('["users","Employees & Codes"]'), "administrator employee tools remain available");
 });
 
 test("product image saves expose progress, validation, and rollback failures", async () => {
@@ -81,4 +83,33 @@ test("bulk inventory adjustment is transactional and fully logged", async () => 
   for (const text of ["warehouse_bulk_adjust_inventory","input_product_ids uuid[]","Quantity change cannot be zero","Adjustment would reduce stock below reserved inventory","insert into public.inventory_movements","private.current_app_role() not in ('fulfillment','admin')"]) assert.ok(sql.includes(text), text);
   for (const text of ["Inventory adjustment","Select products","Apply adjustment to","Apply ${amount>0?\"+\":\"\"}${amount} to ${selected.length} selected products?"]) assert.ok(app.includes(text), text);
   assert.ok(adapter.includes('rpc<number>("warehouse_bulk_adjust_inventory"'));
+});
+
+test("fulfillment navigation is restricted while admin and manager navigation remain intact", async () => {
+  const app = await readFile(new URL("../app/warehouse-app.tsx", import.meta.url), "utf8");
+  assert.ok(app.includes('const fulfillmentNav:[View,string][]=[["orders","Orders"]]'));
+  assert.ok(app.includes('const fulfillmentViews:View[]=["orders"]'));
+  assert.ok(app.includes('role==="fulfillment"&&!fulfillmentViews.includes(view)?"orders":view'));
+  for(const text of ['["dashboard","Dashboard"]','["users","Employees & Codes"]','["catalog","Catalog"]','["history","My Orders"]'])assert.ok(app.includes(text),text);
+});
+
+test("order picking supports persistent item checkoff without changing status", async () => {
+  const app = await readFile(new URL("../app/warehouse-app.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  for(const text of ["warehouse-picked-items:","togglePicked","is-picked",'type="checkbox"'])assert.ok(app.includes(text),text);
+  assert.ok(css.includes(".pick-row.is-picked"));
+  assert.ok(!css.includes('[data-theme="dark"]'));
+});
+
+test("picking list consolidates overlapping products and retains order references", () => {
+  const products=[{id:"shirt",category:"Uniforms",item_location:"A1"},{id:"cup",category:"Supplies",item_location:"B2"}];
+  const orders=[
+    {order_number:"0001",items:[{product_id:"shirt",name:"Shirt",sku:"SH-1",unit_size:"Each",item_location:"A1",requested_quantity:1}]},
+    {order_number:"0002",items:[{product_id:"shirt",name:"Shirt",sku:"SH-1",unit_size:"Each",item_location:"A1",requested_quantity:2},{product_id:"cup",name:"Cup",sku:"CP-1",unit_size:"Case",item_location:"B2",requested_quantity:1}]},
+  ];
+  const result=consolidatePickingItems(orders,products);
+  assert.equal(result.length,2);
+  assert.equal(result.find(item=>item.name==="Shirt").quantity,3);
+  assert.deepEqual(result.find(item=>item.name==="Shirt").orders,["0001","0002"]);
+  assert.equal(result.find(item=>item.name==="Cup").quantity,1);
 });

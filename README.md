@@ -82,6 +82,8 @@ npm.cmd run lint
 
 ## Fulfillment history and product images
 
+- Fulfillment-role navigation is intentionally limited to **Order Queue** and **Order History**; administrators retain the full warehouse toolset.
+- **Print picking list** consolidates active queue items by product, totals requested quantities, and includes SKU, category, item location, unit size, and contributing order numbers. Delivered and Cancelled orders are excluded from quantities that still need picking.
 - Delivered orders remain in **Order Queue** for 30 days, then appear under **Order History**.
 - Fulfillment/admin users can manually move Delivered or Cancelled orders to **Order History**. The order and its items are never deleted.
 - Changing a hidden Delivered or Cancelled order to another status clears its queue-hidden fields and returns it to the active queue.
