@@ -10,6 +10,7 @@ export const supabase = url && key ? createClient(url, key, {
 }) : null;
 
 export const isSupabaseConfigured = Boolean(supabase);
+let restoreSessionPromise:ReturnType<typeof getWarehouseData> extends Promise<infer T>?Promise<T|null>:never|null=null;
 
 function client() {
   if (!supabase) throw new Error("Supabase environment variables are not configured.");
@@ -31,10 +32,17 @@ export async function loginWithPin(pin: string) {
   return rpc<{id:string;display_name:string;role:string}>("warehouse_login_with_pin", { input_pin: pin });
 }
 
-export async function restoreWarehouseSession() {
-  const { data } = await client().auth.getSession();
-  if (!data.session) return null;
-  try { return await getWarehouseData(); } catch { return null; }
+export function restoreWarehouseSession() {
+  // React Strict Mode intentionally mounts effects twice in development.
+  // Share the in-flight restore so both mounts do not compete for the same
+  // Supabase Auth Navigator LockManager lock.
+  if(restoreSessionPromise)return restoreSessionPromise;
+  restoreSessionPromise=(async()=>{
+    const { data } = await client().auth.getSession();
+    if (!data.session) return null;
+    try { return await getWarehouseData(); } catch { return null; }
+  })().finally(()=>{restoreSessionPromise=null});
+  return restoreSessionPromise;
 }
 
 export async function logoutWarehouse() {
@@ -73,10 +81,26 @@ export const saveWarehouseProduct = (value:any) => rpc<string>("warehouse_save_p
   input_sku:value.sku,
   input_description:value.description,
   input_unit_size:value.unit_size,
-  input_low_stock_threshold:Number(value.low_stock_threshold || 0),
+  input_low_stock_threshold:value.low_stock_threshold===""||value.low_stock_threshold==null?null:Number(value.low_stock_threshold),
   input_image_path:value.image_path || null,
   input_item_location:value.item_location || null,
 });
+
+export const getWarehouseReorderAdminData = () => rpc<any>("warehouse_reorder_get_admin_data");
+export const saveWarehouseReorderSettings = (automatic:boolean, weekdays:number[], recipients:string[]) =>
+  rpc("warehouse_reorder_save_settings", {input_automatic_enabled:automatic,input_weekdays:weekdays,input_recipients:recipients});
+export async function invokeWarehouseReorderReport(action:string, values:Record<string,unknown>={}) {
+  const {data,error}=await client().functions.invoke("reorder-reports",{body:{action,...values}});
+  if(error){
+    let safeMessage="";
+    const response=(error as any)?.context;
+    if(response&&typeof response.clone==="function"){
+      try{const body=await response.clone().json();safeMessage=typeof body?.error==="string"?body.error:""}catch{/* Keep the SDK error when the response is not JSON. */}
+    }
+    throw new Error(safeMessage||error.message||"Reorder report request failed.");
+  }
+  if(data?.error)throw new Error(data.error);return data;
+}
 
 export const saveWarehouseCategory = (value:any) => rpc<string>("warehouse_save_category", {
   input_id:value.id || null, input_name:value.name, input_is_active:value.is_active,

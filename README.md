@@ -97,3 +97,59 @@ npm.cmd run lint
 ## Security model
 
 Each browser creates its own anonymous Supabase Auth session. A valid PIN maps that session to an application user through `app_user_sessions`, allowing the same manager or fulfiller to work on multiple devices. All data tables have RLS enabled and direct browser table access is revoked. The browser can execute only the warehouse RPC functions, and every privileged function validates the mapped application role before reading or changing data.
+
+## Reorder Reports setup (administrator only)
+
+The `20260919044053_reorder_reports.sql` migration adds nullable per-product reorder thresholds, secure report settings/history, idempotent scheduled claims, recipient delivery records, and administrator-checked RPCs. Apply migrations in timestamp order; this migration must run after `20260919011330_single_product_inventory_adjustment.sql`.
+
+```powershell
+supabase.cmd login
+supabase.cmd link --project-ref YOUR_PROJECT_REF
+supabase.cmd db push
+```
+
+The Edge Function generates the PDF server-side and sends one Gmail SMTP message per recipient. Create a local file named `supabase-reorder-secrets.env` (it is ignored by Git), add the following values, and never put them in `.env`, frontend code, GitHub, logs, or screenshots:
+
+```env
+WAREHOUSE_GMAIL_USER=your-workspace-account@example.com
+WAREHOUSE_GMAIL_APP_PASSWORD=your-16-character-app-password
+REORDER_SCHEDULER_SECRET=generate-a-long-random-value
+```
+
+Gmail app passwords require 2-Step Verification. Then set and deploy:
+
+```powershell
+supabase.cmd secrets set --env-file .\supabase-reorder-secrets.env
+supabase.cmd functions deploy reorder-reports --no-verify-jwt --use-api
+Remove-Item -LiteralPath .\supabase-reorder-secrets.env
+```
+
+`--no-verify-jwt` is intentional: manual calls perform the existing database-backed administrator PIN/role check, while scheduled calls require `REORDER_SCHEDULER_SECRET`. The service-role key remains an automatic Edge Function secret and is never sent to the browser.
+
+In Supabase SQL Editor, store the public function URL and the same scheduler secret in Vault, then create the five-minute dispatcher. The database function sends only during the selected weekday's 2:00–2:09 PM Pacific window, handles daylight-saving time through `America/Los_Angeles`, claims one run per local date, and never backfills missed runs.
+
+```sql
+select vault.create_secret('https://YOUR_PROJECT_REF.supabase.co', 'project_url');
+select vault.create_secret('THE_SAME_LONG_RANDOM_VALUE', 'reorder_scheduler_secret');
+
+select cron.schedule(
+  'warehouse-reorder-reports',
+  '*/5 * * * *',
+  $job$
+  select net.http_post(
+    url := (select decrypted_secret from vault.decrypted_secrets where name='project_url') || '/functions/v1/reorder-reports',
+    headers := jsonb_build_object(
+      'Content-Type','application/json',
+      'x-reorder-scheduler-secret',(select decrypted_secret from vault.decrypted_secrets where name='reorder_scheduler_secret')
+    ),
+    body := '{"action":"scheduled"}'::jsonb
+  );
+  $job$
+);
+```
+
+Use **Reorder Reports → Test Gmail connection** first; it authenticates to SMTP without sending. Then add an email address you are authorized to test, save settings, choose **Generate & Email Now**, inspect the exact PDF snapshot, and use **Confirm & Send**. No email is sent while previewing. SMTP acceptance is recorded per recipient, but acceptance does not guarantee inbox delivery; check Gmail sent mail, recipient spam/quarantine, and the page's report history. Do not run a live test until the mailbox owner has authorized it.
+
+Automatic scheduling starts disabled with no weekdays and no recipients. Set product thresholds individually; blank means excluded, `0` includes only products with zero available, and products qualify when `Available <= threshold`. Inactive or archived products are excluded. Empty reports send a short no-items email without an attachment.
+
+Supabase/Gmail limits and outbound-SMTP availability depend on the current plan and account. Validate the deployed function's execution limits and Gmail Workspace sending limits before production; GitHub Pages only hosts the static frontend and cannot run SMTP or scheduled work. Pushing this repository does not apply migrations, deploy functions, set secrets, or create the cron job.

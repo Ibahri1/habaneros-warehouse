@@ -123,3 +123,27 @@ test("picking list consolidates overlapping products and retains order reference
   assert.deepEqual(result.find(item=>item.name==="Shirt").orders,["0001","0002"]);
   assert.equal(result.find(item=>item.name==="Cup").quantity,1);
 });
+
+test("administrator reorder reports are secure, idempotent, and preview before email", async () => {
+  const app=await readFile(new URL("../app/warehouse-app.tsx",import.meta.url),"utf8");
+  const sql=await readFile(new URL("../supabase/migrations/20260919044053_reorder_reports.sql",import.meta.url),"utf8");
+  const edge=await readFile(new URL("../supabase/functions/reorder-reports/index.ts",import.meta.url),"utf8");
+  for(const text of ['["reorderReports","Reorder Reports"]','Generate & Email Now','Confirm & Send','Test Gmail connection','Previewing never sends email'])assert.ok(app.includes(text),text);
+  for(const text of ["private.current_app_role()<>'admin'","p.low_stock_threshold is not null","coalesce(wi.available,0)<=p.low_stock_threshold","scheduled_run_key text unique","America/Los_Angeles","on conflict(scheduled_run_key) do nothing","to service_role"])assert.ok(sql.includes(text),text);
+  for(const text of ['action==="preview"','action==="confirm"','smtp.gmail.com','port:465','secure:true','WAREHOUSE_GMAIL_APP_PASSWORD','attachments:pdf?','status:"uncertain"'])assert.ok(edge.includes(text),text);
+  assert.ok(!app.includes("WAREHOUSE_GMAIL_APP_PASSWORD"));
+});
+
+test("reorder report preflight allows actual supabase-js headers before authentication", async()=>{
+  const edge=await readFile(new URL("../supabase/functions/reorder-reports/index.ts",import.meta.url),"utf8");
+  const adapter=await readFile(new URL("../lib/supabase.ts",import.meta.url),"utf8");
+  for(const header of ["authorization","x-client-info","apikey","content-type","x-reorder-scheduler-secret"])assert.ok(edge.includes(header),header);
+  assert.match(edge,/if\(req\.method==="OPTIONS"\)return new Response\(null,\{status:204,headers:CORS\}\)/);
+  assert.ok(edge.indexOf('req.method==="OPTIONS"')<edge.indexOf("req.json()"),"preflight precedes body parsing");
+  assert.ok(edge.includes('if(req.method!=="POST")return json({error:"Method not allowed"},405)'));
+  assert.ok(edge.includes("await requireAdministrator(user)"),"browser POST still requires administrator authorization");
+  assert.ok(edge.includes('supplied!==expected)return json({error:"Unauthorized"},401)'),"scheduler POST still requires its secret");
+  assert.ok(adapter.includes("restoreSessionPromise"),"Strict Mode auth restoration is deduplicated");
+  assert.equal((adapter.match(/createClient\(/g)||[]).length,1,"one browser Supabase client is created");
+  for(const text of ["response.clone().json()",'typeof body?.error==="string"','safeMessage||error.message'])assert.ok(adapter.includes(text),`safe Edge Function error handling includes ${text}`);
+});
