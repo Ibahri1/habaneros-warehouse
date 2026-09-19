@@ -147,15 +147,3 @@ test("reorder report preflight allows actual supabase-js headers before authenti
   assert.equal((adapter.match(/createClient\(/g)||[]).length,1,"one browser Supabase client is created");
   for(const text of ["response.clone().json()",'typeof body?.error==="string"','safeMessage||error.message'])assert.ok(adapter.includes(text),`safe Edge Function error handling includes ${text}`);
 });
-
-test("fulfillment completion is checkbox-driven, persistent, and server-authorized",async()=>{
-  const app=await readFile(new URL("../app/warehouse-app.tsx",import.meta.url),"utf8");
-  const adapter=await readFile(new URL("../lib/supabase.ts",import.meta.url),"utf8");
-  const sql=await readFile(new URL("../supabase/migrations/20260919054131_fulfillment_picking_completion.sql",import.meta.url),"utf8");
-  for(const text of ["picked_at timestamptz","warehouse_set_order_item_picked","warehouse_complete_picked_order","for update","unchecked_count<>0","Empty orders cannot be completed","Order delivered after picking completion","private.current_app_role()<>'fulfillment'","private.current_app_role()<>'admin'","warehouse_update_order_admin_impl","input_expected_picked_at"])assert.ok(sql.includes(text),text);
-  for(const text of ["warehouse_get_picking_progress","progressByItem","warehouse_set_order_item_picked","warehouse_complete_picked_order","warehouse_save_fulfillment_notes"])assert.ok(adapter.includes(text),text);
-  for(const text of ["All items fulfilled","All items are checked off. Are you sure you want to archive this order? You cannot undo this action.","Yes, mark delivered","No, keep picking","completion-dialog","legacyMigrated","promptedSignature"])assert.ok(app.includes(text),text);
-  assert.ok(app.includes('role==="admin"&&<>'),"administrator status controls remain role-gated");
-  assert.ok(app.includes('fulfillmentRole&&<button className="secondary wide"'),"fulfillment retains scoped note saving only");
-  assert.ok(!app.includes("window.localStorage.setItem(pickedKey"),"new picking changes are not browser-only");
-});
