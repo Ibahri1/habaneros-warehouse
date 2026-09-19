@@ -153,3 +153,7 @@ Use **Reorder Reports → Test Gmail connection** first; it authenticates to SMT
 Automatic scheduling starts disabled with no weekdays and no recipients. Set product thresholds individually; blank means excluded, `0` includes only products with zero available, and products qualify when `Available <= threshold`. Inactive or archived products are excluded. Empty reports send a short no-items email without an attachment.
 
 Supabase/Gmail limits and outbound-SMTP availability depend on the current plan and account. Validate the deployed function's execution limits and Gmail Workspace sending limits before production; GitHub Pages only hosts the static frontend and cannot run SMTP or scheduled work. Pushing this repository does not apply migrations, deploy functions, set secrets, or create the cron job.
+
+## Fulfillment picking completion migration
+
+Run `supabase/migrations/20260919054131_fulfillment_picking_completion.sql` after `20260919044053_reorder_reports.sql`. It stores per-item picking timestamps/users, adds concurrency-safe checkbox and completion RPCs, restricts the generic order-status RPC to administrators, and gives Fulfillment a narrowly scoped checked-order delivery action. Apply it with `supabase.cmd db push`; no Edge Function redeployment is required for this picking change.

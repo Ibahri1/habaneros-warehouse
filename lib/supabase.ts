@@ -52,9 +52,10 @@ export async function logoutWarehouse() {
 export async function getWarehouseData() {
   const data=await rpc<any>("warehouse_get_app_data");
   if(data?.user?.role!=="manager"){
-    const hidden=await rpc<string[]>("warehouse_get_queue_hidden_orders");
+    const [hidden,progress]=await Promise.all([rpc<string[]>("warehouse_get_queue_hidden_orders"),rpc<any[]>("warehouse_get_picking_progress")]);
     const hiddenIds=new Set(hidden||[]);
-    data.orders=(data.orders||[]).map((order:any)=>({...order,queue_hidden:hiddenIds.has(order.id)}));
+    const progressByItem=new Map((progress||[]).map((item:any)=>[item.item_id,item]));
+    data.orders=(data.orders||[]).map((order:any)=>({...order,queue_hidden:hiddenIds.has(order.id),items:(order.items||[]).map((item:any)=>({...item,...progressByItem.get(item.id)}))}));
   }
   return data;
 }
@@ -64,6 +65,13 @@ export const submitWarehouseOrder = (locationId:string, note:string, items:{prod
 
 export const updateWarehouseOrder = (orderId:string, status:string, fulfillmentNote:string, deliveryNote:string) =>
   rpc("warehouse_update_order", { input_order_id:orderId, input_status:status, input_fulfillment_note:fulfillmentNote, input_delivery_note:deliveryNote });
+
+export const setWarehouseOrderItemPicked = (orderId:string,itemId:string,picked:boolean,expectedPickedAt:string|null=null) =>
+  rpc<{order_id:string;item_id:string;picked_at:string|null;picked_by:string|null}>("warehouse_set_order_item_picked",{input_order_id:orderId,input_item_id:itemId,input_picked:picked,input_expected_picked_at:expectedPickedAt});
+export const completeWarehousePickedOrder = (orderId:string,fulfillmentNote:string,deliveryNote:string) =>
+  rpc<{completed:boolean;already_delivered:boolean;status:string}>("warehouse_complete_picked_order",{input_order_id:orderId,input_fulfillment_note:fulfillmentNote,input_delivery_note:deliveryNote});
+export const saveWarehouseFulfillmentNotes = (orderId:string,fulfillmentNote:string,deliveryNote:string) =>
+  rpc("warehouse_save_fulfillment_notes",{input_order_id:orderId,input_fulfillment_note:fulfillmentNote,input_delivery_note:deliveryNote});
 
 export const hideFinalizedOrdersFromQueue = (orderIds:string[]) =>
   rpc<number>("warehouse_hide_delivered_orders", { input_order_ids:orderIds });

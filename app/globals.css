@@ -75,6 +75,8 @@
 .pick-requested b{font-size:20px;line-height:1}
 .pick-requested small{margin-top:3px;color:var(--ui-muted);font-size:9px;text-transform:uppercase}
 .pick-row.is-picked .pick-requested{background:#e1e4df}
+.completion-dialog{width:min(520px,100%)}.completion-dialog .modal-form p{margin:0;line-height:1.6}.completion-dialog .modal-actions button{min-height:48px}.pick-check input:disabled{cursor:wait;opacity:.65}
+@media(max-width:760px){.completion-backdrop{padding:14px;align-items:center}.completion-dialog{border-radius:7px;max-height:calc(100dvh - 110px)}.completion-dialog .modal-actions{display:grid;grid-template-columns:1fr}.completion-dialog .modal-actions button{width:100%}.pick-check{min-height:44px}.pick-check input{width:26px;height:26px}}
 
 @media(max-width:760px){
   .list-toolbar{align-items:stretch;flex-direction:column;padding:14px}
