@@ -63,6 +63,9 @@ export const hideFinalizedOrdersFromQueue = (orderIds:string[]) =>
 export const bulkAdjustWarehouseInventory = (productIds:string[], quantity:number, reason:string) =>
   rpc<number>("warehouse_bulk_adjust_inventory", { input_product_ids:productIds, input_quantity:quantity, input_reason:reason });
 
+export const adjustWarehouseInventory = (productId:string, quantity:number, reason:string) =>
+  rpc<{on_hand:number;reserved:number;available:number}>("warehouse_adjust_inventory", { input_product_id:productId, input_quantity:quantity, input_reason:reason });
+
 export const saveWarehouseProduct = (value:any) => rpc<string>("warehouse_save_product", {
   input_id:value.id || null,
   input_category_id:value.category_id || null,

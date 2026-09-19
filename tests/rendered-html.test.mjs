@@ -22,7 +22,7 @@ test("migration protects inventory and PINs", async () => {
 test("admin actions call the live warehouse adapter", async () => {
   const app = await readFile(new URL("../app/warehouse-app.tsx", import.meta.url), "utf8");
   const adapter = await readFile(new URL("../lib/supabase.ts", import.meta.url), "utf8");
-  for (const text of ["saveWarehouseProduct","saveWarehouseCategory","saveWarehouseLocation","saveWarehouseUser","bulkAdjustWarehouseInventory","window.print()","setSelectedOrder(null)"]) assert.ok(app.includes(text), text);
+  for (const text of ["saveWarehouseProduct","saveWarehouseCategory","saveWarehouseLocation","saveWarehouseUser","adjustWarehouseInventory","window.print()","setSelectedOrder(null)"]) assert.ok(app.includes(text), text);
   for (const text of ["signInAnonymously","warehouse_get_app_data","warehouse_save_user","warehouse_bulk_adjust_inventory"]) assert.ok(adapter.includes(text), text);
   assert.ok(adapter.includes("warehouse_hide_delivered_orders"));
   assert.ok(app.includes('const adminNav:[View,string][]='), "administrator navigation remains available");
@@ -77,13 +77,22 @@ test("managers support multiple locations and all-location access", async () => 
   for (const text of ["All locations","Select all that apply","New active locations will be included automatically.","location_ids"]) assert.ok(app.includes(text), text);
 });
 
-test("bulk inventory adjustment is transactional and fully logged", async () => {
-  const sql = await readFile(new URL("../supabase/migrations/20260813003347_multi_location_managers_bulk_inventory.sql", import.meta.url), "utf8");
+test("single-product inventory adjustment is transactional and fully logged", async () => {
+  const sql = await readFile(new URL("../supabase/migrations/20260919011330_single_product_inventory_adjustment.sql", import.meta.url), "utf8");
   const app = await readFile(new URL("../app/warehouse-app.tsx", import.meta.url), "utf8");
   const adapter = await readFile(new URL("../lib/supabase.ts", import.meta.url), "utf8");
-  for (const text of ["warehouse_bulk_adjust_inventory","input_product_ids uuid[]","Quantity change cannot be zero","Adjustment would reduce stock below reserved inventory","insert into public.inventory_movements","private.current_app_role() not in ('fulfillment','admin')"]) assert.ok(sql.includes(text), text);
-  for (const text of ["Inventory adjustment","Select products","Apply adjustment to","Apply ${amount>0?\"+\":\"\"}${amount} to ${selected.length} selected products?"]) assert.ok(app.includes(text), text);
-  assert.ok(adapter.includes('rpc<number>("warehouse_bulk_adjust_inventory"'));
+  for (const text of ["warehouse_adjust_inventory","for update","Quantity change cannot be zero","Adjustment would reduce stock below reserved inventory","insert into public.inventory_movements","private.current_app_role() not in ('fulfillment','admin')","inventory.on_hand-inventory.reserved"]) assert.ok(sql.includes(text), text);
+  for (const text of ["Inventory adjustment","Available inventory","How many units should be added?","Original","After change","Pending net adjustment","Save adjustment","Discard / Cancel"]) assert.ok(app.includes(text), text);
+  for (const text of ["Apply adjustment to","product-checklist","bulk-adjustment",'className="product-check"']) assert.ok(!app.includes(text), `${text} bulk UI is removed`);
+  assert.ok(adapter.includes('rpc<{on_hand:number;reserved:number;available:number}>("warehouse_adjust_inventory"'));
+});
+
+test("management searches, product category filter, and requested-left picking layout are present", async () => {
+  const app = await readFile(new URL("../app/warehouse-app.tsx", import.meta.url), "utf8");
+  const css = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
+  for(const text of ["Search products, SKU, or unit","Search categories","Search locations","All categories","Uncategorized","clear-search","pick-requested"])assert.ok(app.includes(text),text);
+  assert.ok(!app.includes('<span className="pick-num">{i+1}</span>'));
+  for(const text of [".inventory-product-row",".inventory-stepper",".inventory-comparison",".pick-requested"])assert.ok(css.includes(text),text);
 });
 
 test("fulfillment navigation is restricted while admin and manager navigation remain intact", async () => {
