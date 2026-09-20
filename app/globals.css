@@ -25,6 +25,12 @@
 /* Fulfillment picking checkoff is deliberately independent from order status. */
 .pick-check{display:flex;align-items:center;gap:5px;flex:0 0 auto;cursor:pointer;color:var(--ui-muted);font-size:10px}
 .pick-check input{width:19px;height:19px;min-height:0;padding:0;accent-color:var(--ui-green)}
+.pick-check{min-height:44px;padding:4px 2px}
+.pick-check input{width:24px;height:24px}
+.completion-backdrop{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:20px}
+.completion-dialog{width:min(100%,440px);max-height:calc(100dvh - 40px);overflow:auto;padding:24px}
+.completion-dialog h2{margin:0 0 12px}.completion-dialog p{line-height:1.5}
+.completion-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px}.completion-actions button{min-height:44px;flex:1 1 180px}
 .pick-row.is-picked{background:#eef0ec;color:#707a73}
 .pick-row.is-picked .grow b{text-decoration:line-through}
 .pick-row.is-picked .grow small,.pick-row.is-picked .item-location{color:#7b847e}

@@ -104,6 +104,17 @@
     padding-bottom: 0;
   }
 
+  .completion-backdrop {
+    align-items: center;
+    padding: 16px;
+  }
+
+  .completion-dialog {
+    width: 100%;
+    max-height: calc(100dvh - 32px);
+    border-radius: 8px;
+  }
+
   .modal {
     max-width: 100%;
     max-height: calc(100dvh - 12px);

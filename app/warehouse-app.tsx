@@ -9,6 +9,7 @@ import {
   saveWarehouseProduct, saveWarehouseSettings, saveWarehouseUser,
   submitWarehouseOrder, updateWarehouseOrder, uploadWarehouseProductImage, removeWarehouseProductImage, productImageUrl,
   getWarehouseReorderAdminData, saveWarehouseReorderSettings, invokeWarehouseReorderReport,
+  setWarehouseOrderItemPicked, completeWarehousePickedOrder, saveWarehouseFulfillmentNotes,
 } from "@/lib/supabase";
 import { consolidatePickingItems } from "@/lib/picking-list.mjs";
 
@@ -18,7 +19,7 @@ type Product = {id:string;category_id:string|null;category:string|null;name:stri
 type Category = {id:string;name:string;is_active:boolean;sort_order:number};
 type Location = {id:string;name:string;is_active:boolean;assigned?:boolean;sort_order:number};
 type User = {id:string;display_name:string;role:Role;is_active:boolean;location_ids:string[];all_locations:boolean};
-type OrderItem = {id:string;product_id:string|null;name:string;sku:string|null;unit_size:string|null;item_location:string|null;requested_quantity:number;delivered_quantity:number;cancelled_quantity:number;fulfillment_note:string|null};
+type OrderItem = {id:string;product_id:string|null;name:string;sku:string|null;unit_size:string|null;item_location:string|null;requested_quantity:number;delivered_quantity:number;cancelled_quantity:number;fulfillment_note:string|null;picked_at?:string|null;picked_by?:string|null};
 type Order = {id:string;order_number:string;manager_id:string|null;manager:string;location_id:string|null;location:string;status:string;order_note:string|null;fulfillment_note:string|null;delivery_note:string|null;submitted_at:string;delivered_at:string|null;queue_hidden?:boolean;items:OrderItem[]};
 type Movement = {id:string;product_id:string;product:string;quantity:number;action:string;reason:string;actor:string|null;created_at:string};
 type AppData = {user:{id:string;display_name:string;role:Role};locations:Location[];categories:Category[];products:Product[];orders:Order[];movements:Movement[];users:User[];settings:Record<string,any>};
@@ -85,7 +86,7 @@ export function WarehouseApp() {
   return <div className={`app-shell ${working?"is-working":""}`} style={{"--print-logo":'url("./assets/habaneros-logo.png")'} as React.CSSProperties}>
     <header className="topbar"><button className="brand" onClick={()=>navigate(role==="manager"?"catalog":role==="fulfillment"?"orders":"dashboard")} aria-label="Habanero's Mexican Food warehouse home"><BrandLogo compact/></button><div className="account"><span className="account-copy"><b>{data.user.display_name}</b><small>{role==="manager"?"Store Manager":role==="admin"?"Administrator":"Fulfillment"}</small></span><button className="icon-button" onClick={logout} aria-label="Sign out">↪</button></div></header>
     <div className="body"><aside>{role!=="manager"&&<div className={`role-banner role-${role}`}>{role==="admin"?"Administrator":"Fulfillment"}</div>}<nav>{nav.map(([id,label])=><button key={id} className={safeView===id&&!selectedOrder?"active":""} onClick={()=>navigate(id)}><span>{navIcon(id)}</span>{label}</button>)}</nav><div className="warehouse-state"><span className="pulse"/>Warehouse online</div></aside>
-    <main>{role==="manager"?<Manager data={data} view={safeView} navigate={navigate} selectedOrder={selectedOrder} setSelectedOrder={setSelectedOrder} cart={cart} changeQty={changeQty} cartCount={cartCount} category={category} setCategory={setCategory} search={search} setSearch={setSearch} location={location} setLocation={setLocation} note={note} setNote={setNote} submitOrder={submitOrder}/>:<Admin data={data} view={safeView} navigate={navigate} selectedOrder={selectedOrder} setSelectedOrder={setSelectedOrder} act={act} updateOrder={updateOrder}/>}</main></div>
+    <main>{role==="manager"?<Manager data={data} view={safeView} navigate={navigate} selectedOrder={selectedOrder} setSelectedOrder={setSelectedOrder} cart={cart} changeQty={changeQty} cartCount={cartCount} category={category} setCategory={setCategory} search={search} setSearch={setSearch} location={location} setLocation={setLocation} note={note} setNote={setNote} submitOrder={submitOrder}/>:<Admin data={data} view={safeView} navigate={navigate} selectedOrder={selectedOrder} setSelectedOrder={setSelectedOrder} act={act} updateOrder={updateOrder} refresh={refresh} notify={notify}/>}</main></div>
     {toast&&<div className={`toast ${toast.toLowerCase().includes("invalid")||toast.toLowerCase().includes("required")?"error":""}`}>{toast}</div>}
   </div>;
 }
@@ -141,7 +142,7 @@ function Admin(p:any){
     setEditor(null);
   };
   const remove=async(kind:"product"|"category"|"location"|"user",value:any)=>{const display=value.name||value.display_name;if(!window.confirm(`Permanently delete ${display}? This cannot be undone.`))return;const actions:any={product:deleteWarehouseProduct,category:deleteWarehouseCategory,location:deleteWarehouseLocation,user:deleteWarehouseUser};try{await p.act(()=>actions[kind](value.id),`${kind[0].toUpperCase()+kind.slice(1)} deleted`)}catch{return}};
-  if(p.selectedOrder)return <OrderDetail order={p.selectedOrder} back={()=>p.setSelectedOrder(null)} update={(status:string,fulfillment:string,delivery:string)=>p.updateOrder(p.selectedOrder,status,fulfillment,delivery)}/>;
+  if(p.selectedOrder)return <OrderDetail order={p.selectedOrder} back={()=>p.setSelectedOrder(null)} userRole={p.data.user.role} update={(status:string,fulfillment:string,delivery:string)=>p.updateOrder(p.selectedOrder,status,fulfillment,delivery)} completed={async()=>{await p.refresh();p.setSelectedOrder(null);p.navigate("orders");p.notify("Order marked Delivered and moved to Order History")}}/>;
   const open=(kind:any,value:any={})=>setEditor({kind,value});
   const matchingProducts=p.data.products.filter((x:Product)=>`${x.name} ${x.sku||""} ${x.unit_size||""}`.toLowerCase().includes(productSearch.trim().toLowerCase())&&(productCategory==="all"?true:productCategory==="uncategorized"?!x.category_id:x.category_id===productCategory));
   const matchingCategories=p.data.categories.filter((x:Category)=>x.name.toLowerCase().includes(categorySearch.trim().toLowerCase()));
@@ -167,13 +168,112 @@ function Dashboard({data,navigate,select}:{data:AppData;navigate:(v:View)=>void;
   return <><PageHead eyebrow="FULFILLMENT OVERVIEW" title={`Good morning, ${data.user.display_name}`} subtitle="Here is what needs attention at the warehouse." action={<button className="primary" onClick={()=>navigate("orders")}>Open order queue →</button>}/><div className="stats"><Stat n={String(data.orders.filter(o=>!["Delivered","Cancelled"].includes(o.status)).length)} label="Pending orders" tone="orange"/><Stat n={String(count("Picking"))} label="Currently picking" tone="blue"/><Stat n={String(count("Out for Delivery"))} label="Out for delivery" tone="purple"/><Stat n={String(low.length)} label="Low-stock alerts" tone="red"/></div><div className="dashboard-grid"><section className="panel wide-panel"><PanelTitle title="Recently submitted" action="View queue" onClick={()=>navigate("orders")}/><OrderRows orders={data.orders.slice(0,4)} select={select}/></section><section className="panel"><PanelTitle title="Low stock" action="Manage" onClick={()=>navigate("products")}/>{low.slice(0,5).map(x=><div className="stock-row" key={x.id}><div className="product-icon small">□</div><div className="grow"><b>{x.name}</b><small>{x.sku}</small></div><strong>{x.available}</strong></div>)}</section><section className="panel"><PanelTitle title="Recent adjustments" action="Movement log" onClick={()=>navigate("movements")}/>{data.movements.slice(0,3).map(x=><div className="audit-row" key={x.id}><span>{x.quantity>0?"+":""}{x.quantity}</span><div><b>{x.product}</b><small>{x.reason}</small></div></div>)}</section></div></>;
 }
 
-function OrderDetail({order,back,manager,update}:{order:Order;back:()=>void;manager?:boolean;update?:(s:string,f:string,d:string)=>void}){
+function OrderDetail({order,back,manager,userRole,update,completed}:{order:Order;back:()=>void;manager?:boolean;userRole?:Role;update?:(s:string,f:string,d:string)=>void;completed?:()=>Promise<void>}){
   const [fulfillment,setFulfillment]=useState(order.fulfillment_note||"");
   const [delivery,setDelivery]=useState(order.delivery_note||"");
-  const pickedKey=`warehouse-picked-items:${order.id}`;
-  const [pickedItems,setPickedItems]=useState<string[]>(()=>{if(manager)return [];try{const saved=JSON.parse(window.localStorage.getItem(pickedKey)||"[]");return Array.isArray(saved)?saved.filter(id=>order.items.some(item=>item.id===id)):[]}catch{return []}});
-  const togglePicked=(id:string)=>setPickedItems(current=>{const next=current.includes(id)?current.filter(value=>value!==id):[...current,id];try{if(next.length)window.localStorage.setItem(pickedKey,JSON.stringify(next));else window.localStorage.removeItem(pickedKey)}catch{return next}return next});
-  return <div className="print-area"><button className="back no-print" onClick={back}>← Back to orders</button><PageHead eyebrow={order.order_number} title={`${order.location} order`} subtitle={`Submitted by ${order.manager} · ${when(order.submitted_at)}`} action={<span className={statusClass(order.status)}>{order.status}</span>}/><div className="split"><section className="panel"><h3>Picking & packing details</h3>{order.items.map(x=>{const picked=pickedItems.includes(x.id);return <div className={`pick-row ${picked?"is-picked":""}`} key={x.id}>{!manager&&<label className="pick-check no-print"><input type="checkbox" checked={picked} onChange={()=>togglePicked(x.id)}/><span>Picked</span></label>}<span className="pick-requested"><b>{x.requested_quantity}</b><small>requested</small></span><div className="grow"><b>{x.name}</b><small>{x.sku} · {x.unit_size}</small>{!manager&&<span className="item-location">Item Location: {x.item_location||"Not set"}</span>}</div></div>})}{!manager&&<div className="screen-notes"><label>Fulfillment notes<textarea value={fulfillment} onChange={e=>setFulfillment(e.target.value)} placeholder="Substitutions, shortages, or packing notes..."/></label><label>Delivery note<textarea value={delivery} onChange={e=>setDelivery(e.target.value)} placeholder="Where and to whom the order was delivered..."/></label></div>}<div className="print-only print-notes"><h3>Order notes</h3><div><b>Manager note</b><p>{order.order_note||"None"}</p></div><div><b>Fulfillment note</b><p>{fulfillment||"None"}</p></div><div><b>Delivery note</b><p>{delivery||"None"}</p></div></div></section><section className="panel order-side"><h3>Order details</h3><dl><div><dt>Destination</dt><dd>{order.location}</dd></div><div><dt>Manager</dt><dd>{order.manager}</dd></div><div><dt>Items</dt><dd>{order.items.length}</dd></div><div><dt>Order note</dt><dd>{order.order_note||"None"}</dd></div></dl>{!manager&&<><label>Update status</label><div className="status-actions">{["Confirmed","Picking","Out for Delivery","Delivered","Cancelled"].map(status=><button key={status} className={order.status===status?"primary":"secondary"} onClick={()=>update?.(status,fulfillment,delivery)}>{status}</button>)}</div><button className="secondary wide" onClick={()=>update?.(order.status,fulfillment,delivery)}>Save notes</button><button className="print-button" onClick={()=>window.print()}>Print picking list</button></>}</section></div></div>;
+  const [picked,setPicked]=useState<Record<string,string|null>>(()=>Object.fromEntries(order.items.map(item=>[item.id,item.picked_at||null])));
+  const [busyItem,setBusyItem]=useState<string|null>(null);
+  const [dialogItem,setDialogItem]=useState<string|null>(null);
+  const [processing,setProcessing]=useState(false);
+  const [pickError,setPickError]=useState("");
+  const [completionError,setCompletionError]=useState("");
+  const dialogRef=useRef<HTMLDivElement>(null);
+  const lastPromptRef=useRef<string>("");
+  const legacyMigratedRef=useRef(false);
+  const active=!isFinalizedOrder(order.status);
+  const allPicked=order.items.length>0&&order.items.every(item=>Boolean(picked[item.id]));
+  const latestItem=order.items.filter(item=>picked[item.id]).sort((a,b)=>{
+    const difference=Date.parse(picked[b.id]||"")-Date.parse(picked[a.id]||"");
+    return (Number.isNaN(difference)?0:difference)||a.id.localeCompare(b.id);
+  })[0];
+
+  // Only a fresh server order updates progress; finishing a local save must not
+  // reapply the stale order prop before the next poll.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(()=>{if(busyItem||dialogItem)return;let current=true;queueMicrotask(()=>{if(current)setPicked(Object.fromEntries(order.items.map(item=>[item.id,item.picked_at||null])))});return()=>{current=false}},[order]);
+  useEffect(()=>{
+    if(manager||legacyMigratedRef.current)return;
+    legacyMigratedRef.current=true;
+    const key=`warehouse-picked-items:${order.id}`;
+    let oldIds:string[]=[];
+    try{const stored=JSON.parse(window.localStorage.getItem(key)||"[]");if(Array.isArray(stored))oldIds=stored.filter((id):id is string=>typeof id==="string")}catch{/* Ignore malformed legacy data. */}
+    const pending=oldIds.filter(id=>order.items.some(item=>item.id===id&&!item.picked_at));
+    if(!pending.length){window.localStorage.removeItem(key);return}
+    void (async()=>{
+      setBusyItem("legacy");
+      try{
+        for(const id of pending){
+          const result=await setWarehouseOrderItemPicked(order.id,id,true,null);
+          setPicked(current=>({...current,[id]:result.picked_at}));
+        }
+        window.localStorage.removeItem(key);
+      }catch(error){setPickError(`Could not transfer saved picking progress: ${messageOf(error)}`)}
+      finally{setBusyItem(null)}
+    })();
+  // Run once for this detail instance; progress thereafter comes from Supabase.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[]);
+  useEffect(()=>{
+    if(userRole!=="fulfillment"||!active||!allPicked||busyItem||dialogItem||processing)return;
+    const signature=order.items.map(item=>`${item.id}:${picked[item.id]}`).join("|");
+    if(lastPromptRef.current===signature)return;
+    lastPromptRef.current=signature;
+    setDialogItem(latestItem?.id||null);
+  },[userRole,active,allPicked,busyItem,dialogItem,processing,order.items,picked,latestItem?.id]);
+  useEffect(()=>{
+    if(!dialogItem)return;
+    const prior=document.activeElement as HTMLElement|null;
+    dialogRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    const onKey=(event:KeyboardEvent)=>{
+      if(event.key==="Escape"&&!processing){event.preventDefault();void keepPicking()}
+      if(event.key==="Tab"){
+        const buttons=Array.from(dialogRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)")||[]);
+        const index=buttons.indexOf(document.activeElement as HTMLButtonElement);
+        if(buttons.length&&event.shiftKey&&index===0){event.preventDefault();buttons[buttons.length-1].focus()}
+        else if(buttons.length&&!event.shiftKey&&index===buttons.length-1){event.preventDefault();buttons[0].focus()}
+      }
+    };
+    document.addEventListener("keydown",onKey);
+    return()=>{document.removeEventListener("keydown",onKey);prior?.focus()};
+  // The dialog's lifetime, not each changing input value, controls focus.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[dialogItem,processing]);
+
+  async function togglePicked(id:string,desired?:boolean){
+    if(busyItem||processing||dialogItem)return;
+    const expected=picked[id]||null;
+    const next=desired??!expected;
+    setBusyItem(id);setPickError("");
+    try{
+      const result=await setWarehouseOrderItemPicked(order.id,id,next,expected);
+      setPicked(current=>({...current,[id]:result.picked_at}));
+    }catch(error){setPickError(messageOf(error));setPicked(current=>({...current,[id]:expected}))}
+    finally{setBusyItem(null)}
+  }
+  async function keepPicking(){
+    if(!dialogItem||processing)return;
+    setProcessing(true);setCompletionError("");
+    try{
+      const result=await setWarehouseOrderItemPicked(order.id,dialogItem,false,picked[dialogItem]||null);
+      setPicked(current=>({...current,[dialogItem]:result.picked_at}));
+      setDialogItem(null);
+    }catch(error){setCompletionError(messageOf(error))}
+    finally{setProcessing(false)}
+  }
+  async function markDelivered(){
+    if(processing||!dialogItem)return;
+    setProcessing(true);setCompletionError("");
+    try{
+      await completeWarehousePickedOrder(order.id,fulfillment,delivery);
+      await completed?.();
+    }catch(error){setCompletionError(messageOf(error));setProcessing(false)}
+  }
+  async function saveNotes(){
+    setProcessing(true);setPickError("");
+    try{await saveWarehouseFulfillmentNotes(order.id,fulfillment,delivery);setPickError("Notes saved")}
+    catch(error){setPickError(messageOf(error))}finally{setProcessing(false)}
+  }
+  return <div className="print-area"><button className="back no-print" onClick={back}>← Back to orders</button><PageHead eyebrow={order.order_number} title={`${order.location} order`} subtitle={`Submitted by ${order.manager} · ${when(order.submitted_at)}`} action={<span className={statusClass(order.status)}>{order.status}</span>}/><div className="split"><section className="panel"><h3>Picking & packing details</h3>{order.items.map(x=>{const checked=Boolean(picked[x.id]);return <div className={`pick-row ${checked?"is-picked":""}`} key={x.id}>{!manager&&<label className="pick-check no-print"><input type="checkbox" checked={checked} disabled={!active||Boolean(busyItem)||processing||Boolean(dialogItem)} onChange={()=>void togglePicked(x.id)}/><span>Picked</span></label>}<span className="pick-requested"><b>{x.requested_quantity}</b><small>requested</small></span><div className="grow"><b>{x.name}</b><small>{x.sku} · {x.unit_size}</small>{!manager&&<span className="item-location">Item Location: {x.item_location||"Not set"}</span>}</div></div>})}{pickError&&<p className="inline-error no-print" role="alert">{pickError}</p>}{!manager&&<div className="screen-notes"><label>Fulfillment notes<textarea value={fulfillment} onChange={e=>setFulfillment(e.target.value)} placeholder="Substitutions, shortages, or packing notes..."/></label><label>Delivery note<textarea value={delivery} onChange={e=>setDelivery(e.target.value)} placeholder="Where and to whom the order was delivered..."/></label></div>}<div className="print-only print-notes"><h3>Order notes</h3><div><b>Manager note</b><p>{order.order_note||"None"}</p></div><div><b>Fulfillment note</b><p>{fulfillment||"None"}</p></div><div><b>Delivery note</b><p>{delivery||"None"}</p></div></div></section><section className="panel order-side"><h3>Order details</h3><dl><div><dt>Destination</dt><dd>{order.location}</dd></div><div><dt>Manager</dt><dd>{order.manager}</dd></div><div><dt>Items</dt><dd>{order.items.length}</dd></div><div><dt>Order note</dt><dd>{order.order_note||"None"}</dd></div></dl>{userRole==="admin"&&<><label>Update status</label><div className="status-actions">{["Confirmed","Picking","Out for Delivery","Delivered","Cancelled"].map(status=><button key={status} className={order.status===status?"primary":"secondary"} onClick={()=>update?.(status,fulfillment,delivery)}>{status}</button>)}</div></>}{!manager&&<><button className="secondary wide" disabled={processing} onClick={()=>userRole==="admin"?update?.(order.status,fulfillment,delivery):void saveNotes()}>{processing?"Saving…":"Save notes"}</button><button className="print-button" onClick={()=>window.print()}>Print picking list</button></>}</section></div>{dialogItem&&<div className="modal-backdrop completion-backdrop no-print" role="presentation" onMouseDown={event=>{if(event.target===event.currentTarget&&!processing)void keepPicking()}}><div className="modal completion-dialog" role="dialog" aria-modal="true" aria-labelledby="completion-title" aria-describedby="completion-message" ref={dialogRef}><h2 id="completion-title">All items fulfilled</h2><p id="completion-message">All items are checked off. Are you sure you want to archive this order? You cannot undo this action.</p>{completionError&&<p className="inline-error" role="alert">{completionError}</p>}<div className="completion-actions"><button className="secondary" disabled={processing} onClick={()=>void keepPicking()}>No, keep picking</button><button className="primary" disabled={processing} onClick={()=>void markDelivered()}>{processing?"Completing…":"Yes, mark delivered"}</button></div></div></div>}</div>;
 }
 
 function InventoryForm({data,act}:{data:AppData;act:any}){

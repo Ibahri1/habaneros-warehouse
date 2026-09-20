@@ -19,6 +19,21 @@ test("migration protects inventory and PINs", async () => {
   assert.ok(!sql.includes("service_role"));
 });
 
+test("fulfillment delivery is checked and generic status changes are admin-only", async () => {
+  const sql = await readFile(new URL("../supabase/migrations/20260920004913_fulfillment_picking_completion.sql", import.meta.url), "utf8");
+  const app = await readFile(new URL("../app/warehouse-app.tsx", import.meta.url), "utf8");
+  const adapter = await readFile(new URL("../lib/supabase.ts", import.meta.url), "utf8");
+  for (const text of ["picked_at timestamptz","warehouse_set_order_item_picked","input_expected_picked_at","for update","warehouse_complete_picked_order","unchecked_count>0","warehouse_update_order_admin_impl","Administrator access required","already_delivered"]) assert.ok(sql.includes(text), text);
+  assert.ok(sql.includes("revoke all on function public.warehouse_update_order_admin_impl"));
+  assert.ok(sql.includes("is distinct from 'admin'::public.app_role"));
+  assert.ok(app.includes('userRole==="admin"&&<><label>Update status</label>'));
+  assert.ok(app.includes("All items fulfilled"));
+  assert.ok(app.includes("No, keep picking"));
+  assert.ok(app.includes("Yes, mark delivered"));
+  assert.ok(adapter.includes('"warehouse_get_picking_progress"'));
+  assert.ok(adapter.includes('"warehouse_complete_picked_order"'));
+});
+
 test("admin actions call the live warehouse adapter", async () => {
   const app = await readFile(new URL("../app/warehouse-app.tsx", import.meta.url), "utf8");
   const adapter = await readFile(new URL("../lib/supabase.ts", import.meta.url), "utf8");

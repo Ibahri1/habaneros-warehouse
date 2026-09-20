@@ -102,6 +102,10 @@ Each browser creates its own anonymous Supabase Auth session. A valid PIN maps t
 
 The `20260919044053_reorder_reports.sql` migration adds nullable per-product reorder thresholds, secure report settings/history, idempotent scheduled claims, recipient delivery records, and administrator-checked RPCs. Apply migrations in timestamp order; this migration must run after `20260919011330_single_product_inventory_adjustment.sql`.
 
+### Fulfillment picking completion migration
+
+Run `supabase/migrations/20260920004913_fulfillment_picking_completion.sql` in the Supabase SQL Editor after all earlier migrations and before publishing the updated frontend. It stores each picked checkbox and timestamp on its order item, restricts the generic order-status RPC to administrators, and adds fulfillment-only item checkoff, notes, and all-items-checked delivery RPCs. Delivery reuses the existing transactional inventory and movement-log logic. Previously browser-local checked items are transferred to Supabase when that order is opened on the same browser; other devices will then see them. No Edge Function redeployment or email change is required for this workflow.
+
 ```powershell
 supabase.cmd login
 supabase.cmd link --project-ref YOUR_PROJECT_REF
